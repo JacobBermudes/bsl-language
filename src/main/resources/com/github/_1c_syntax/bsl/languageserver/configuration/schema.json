@@ -29,9 +29,6 @@
                 "AssignAliasFieldsInQuery": {
                     "$ref": "parameters-schema.json#/definitions/AssignAliasFieldsInQuery"
                 },
-                "BadWords": {
-                    "$ref": "parameters-schema.json#/definitions/BadWords"
-                },
                 "BeginTransactionBeforeTryCatch": {
                     "$ref": "parameters-schema.json#/definitions/BeginTransactionBeforeTryCatch"
                 },
@@ -277,6 +274,9 @@
                 },
                 "MagicNumber": {
                     "$ref": "parameters-schema.json#/definitions/MagicNumber"
+                },
+                "MetadataBorders": {
+                    "$ref": "parameters-schema.json#/definitions/MetadataBorders"
                 },
                 "MetadataObjectNameLength": {
                     "$ref": "parameters-schema.json#/definitions/MetadataObjectNameLength"
