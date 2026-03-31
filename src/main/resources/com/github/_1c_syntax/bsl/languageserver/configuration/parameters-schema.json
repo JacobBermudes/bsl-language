@@ -1134,6 +1134,12 @@
                     "default": "-1,0,1",
                     "type": "string",
                     "title": "allowed numbers, coma separated. Example:-1,0,1,60"
+                },
+                "ignoredFunctions": {
+                    "description": "Comma-separated list of functions whose parameters can be magic numbers (e.g. \"Дата, Датавремя\")",
+                    "default": "Дата, Датавремя, Data, DateTime",
+                    "type": "string",
+                    "title": "Comma-separated list of functions whose parameters can be magic numbers (e.g. \"Дата, Датавремя\"))"
                 }
             },
             "$id": "#/definitions/MagicNumber"

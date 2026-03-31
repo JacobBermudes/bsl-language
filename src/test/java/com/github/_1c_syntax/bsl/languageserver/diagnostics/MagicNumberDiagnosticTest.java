@@ -69,6 +69,22 @@ class MagicNumberDiagnosticTest extends AbstractDiagnosticTest<MagicNumberDiagno
   }
 
   @Test
+  void testIgnoredFunctions() {
+    Map<String, Object> config = diagnosticInstance.getInfo().getDefaultConfiguration();
+    
+    config.put("ignoredFunctions", "Дата, Датавремя, Data, DateTime");
+    diagnosticInstance.configure(config);
+
+    List<Diagnostic> diagnostics = getDiagnostics();
+
+    assertThat(diagnostics).hasSize(7);
+
+    assertThat(diagnostics)
+      .noneMatch(d -> d.getRange().getStart().getLine() == 54);
+
+  }
+
+  @Test
   void testIndexes() {
     Map<String, Object> config = diagnosticInstance.getInfo().getDefaultConfiguration();
     config.put("allowMagicIndexes", false);

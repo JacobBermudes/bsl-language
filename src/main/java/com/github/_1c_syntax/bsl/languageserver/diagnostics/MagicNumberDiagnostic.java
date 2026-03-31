@@ -66,7 +66,7 @@ public class MagicNumberDiagnostic extends AbstractMagicValueDiagnostic {
     type = String.class,
     defaultValue = DEFAULT_IGNORED_FUNC
   )
-  private final List<String> ignoredFunctions = new ArrayList<>();
+  private final List<String> ignoredFunctions = new ArrayList<>(Arrays.asList(DEFAULT_IGNORED_FUNC.split(",")));
 
   @Override
   public void configure(Map<String, Object> configuration) {
