@@ -66,7 +66,7 @@ public class MagicNumberDiagnostic extends AbstractMagicValueDiagnostic {
     type = String.class,
     defaultValue = DEFAULT_IGNORED_FUNC
   )
-  private final List<String> ignoredFunctions = new ArrayList<>(Arrays.asList(DEFAULT_IGNORED_FUNC.split(",")));
+  private final List<String> ignoredFunctions = new ArrayList<>(Arrays.asList(DEFAULT_IGNORED_FUNC.toLowerCase().split(",")));
 
   @Override
   public void configure(Map<String, Object> configuration) {
@@ -102,11 +102,14 @@ public class MagicNumberDiagnostic extends AbstractMagicValueDiagnostic {
     ParserRuleContext current = ctx.getParent();
     while (current != null) {
         if (current instanceof BSLParser.MethodCallContext) {
-            BSLParser.MethodCallContext call = (BSLParser.MethodCallContext) current;
-            
+          BSLParser.MethodCallContext call = (BSLParser.MethodCallContext) current;  
+          if (call.methodName() != null) {
             String functionName = call.methodName().getText().toLowerCase();
-            
-            return ignoredFunctions.contains(functionName);
+              
+            if (ignoredFunctions.contains(functionName)) {
+              return true;
+            }
+          }
         }
 
         if (current instanceof BSLParser.StatementContext) {
