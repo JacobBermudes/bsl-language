@@ -47,6 +47,7 @@ import java.util.Map;
 public class MagicNumberDiagnostic extends AbstractMagicValueDiagnostic {
 
   private static final String DEFAULT_AUTHORIZED_NUMBERS = "-1,0,1";
+  private static final String DEFAULT_IGNORED_FUNC = "Дата,Data";
   private static final boolean DEFAULT_ALLOW_MAGIC_NUMBER = true;
 
   @DiagnosticParameter(
@@ -61,16 +62,31 @@ public class MagicNumberDiagnostic extends AbstractMagicValueDiagnostic {
   )
   private boolean allowMagicIndexes = DEFAULT_ALLOW_MAGIC_NUMBER;
 
+  @DiagnosticParameter(
+    type = String.class,
+    defaultValue = DEFAULT_IGNORED_FUNC
+  )
+  private final List<String> ignoredFunctions = new ArrayList<>();
+
   @Override
   public void configure(Map<String, Object> configuration) {
     DiagnosticHelper.configureDiagnostic(this, configuration, "allowMagicIndexes");
 
     this.authorizedNumbers.clear();
+    this.ignoredFunctions.clear();
 
     var authorizedNumbersString =
       (String) configuration.getOrDefault("authorizedNumbers", DEFAULT_AUTHORIZED_NUMBERS);
     for (String s : authorizedNumbersString.split(",")) {
       this.authorizedNumbers.add(s.trim());
+    }
+
+    var ignoredFunctionsString = 
+      (String) configuration.getOrDefault("ignoredFunctions", DEFAULT_IGNORED_FUNC);
+    for (String s : ignoredFunctionsString.split(",")) {
+      if (!s.trim().isEmpty()) {
+        this.ignoredFunctions.add(s.trim().toLowerCase());
+      }
     }
   }
 
@@ -80,6 +96,25 @@ public class MagicNumberDiagnostic extends AbstractMagicValueDiagnostic {
 
   private static boolean insideCallParam(BSLParser.ExpressionContext expression) {
     return expression.getParent() instanceof BSLParser.CallParamContext;
+  }
+
+  private boolean insideIgnoredFunction(BSLParser.NumericContext ctx) {
+    ParserRuleContext current = ctx.getParent();
+    while (current != null) {
+        if (current instanceof BSLParser.MethodCallContext) {
+            BSLParser.MethodCallContext call = (BSLParser.MethodCallContext) current;
+            
+            String functionName = call.methodName().getText().toLowerCase();
+            
+            return ignoredFunctions.contains(functionName);
+        }
+
+        if (current instanceof BSLParser.StatementContext) {
+            break;
+        }
+        current = current.getParent();
+    }
+    return false;
   }
 
   @Override
@@ -116,6 +151,10 @@ public class MagicNumberDiagnostic extends AbstractMagicValueDiagnostic {
   private boolean isWrongExpression(BSLParser.NumericContext ctx, ParserRuleContext numericContextParent) {
     if (mayBeNumberAccess(ctx)) {
       return true;
+    }
+
+    if (insideIgnoredFunction(ctx)) {
+      return false;
     }
 
     var expression = getExpression(numericContextParent);
