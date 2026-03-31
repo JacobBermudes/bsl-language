@@ -107,5 +107,4 @@ class MagicNumberDiagnosticTest extends AbstractDiagnosticTest<MagicNumberDiagno
       .hasRange(49, 32, 34)
       .hasRange(50, 18, 20);
   }
-
 }
