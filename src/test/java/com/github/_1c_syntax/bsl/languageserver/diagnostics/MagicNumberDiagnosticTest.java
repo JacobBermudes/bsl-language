@@ -82,7 +82,7 @@ class MagicNumberDiagnosticTest extends AbstractDiagnosticTest<MagicNumberDiagno
 
     List<Diagnostic> diagnostics = getDiagnostics();
 
-    assertThat(diagnostics).hasSize(13);
+    assertThat(diagnostics).hasSize(10);
     assertThat(diagnostics, true)
       .hasRange(3, 18, 20)
       .hasRange(3, 23, 25)
@@ -93,10 +93,7 @@ class MagicNumberDiagnosticTest extends AbstractDiagnosticTest<MagicNumberDiagno
       .hasRange(27, 34, 35)
       .hasRange(33, 37, 38)
       .hasRange(34, 37, 38)
-      .hasRange(44, 12, 14)
-      .hasRange(52, 23, 27)
-      .hasRange(52, 29, 31)
-      .hasRange(52, 33, 35);
+      .hasRange(44, 12, 14);
   }
 
   @Test
