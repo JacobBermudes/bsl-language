@@ -47,7 +47,7 @@ import java.util.Map;
 public class MagicNumberDiagnostic extends AbstractMagicValueDiagnostic {
 
   private static final String DEFAULT_AUTHORIZED_NUMBERS = "-1,0,1";
-  private static final String DEFAULT_IGNORED_FUNC = "Дата,Data";
+  private static final String DEFAULT_IGNORED_FUNC = "";
   private static final boolean DEFAULT_ALLOW_MAGIC_NUMBER = true;
 
   @DiagnosticParameter(
@@ -66,7 +66,7 @@ public class MagicNumberDiagnostic extends AbstractMagicValueDiagnostic {
     type = String.class,
     defaultValue = DEFAULT_IGNORED_FUNC
   )
-  private final List<String> ignoredFunctions = new ArrayList<>();
+  private final List<String> ignoredFunctions = new ArrayList<>(Arrays.asList(DEFAULT_IGNORED_FUNC.toLowerCase().split(",")));
 
   @Override
   public void configure(Map<String, Object> configuration) {
@@ -100,19 +100,32 @@ public class MagicNumberDiagnostic extends AbstractMagicValueDiagnostic {
 
   private boolean insideIgnoredFunction(BSLParser.NumericContext ctx) {
     ParserRuleContext current = ctx.getParent();
+    
     while (current != null) {
-        if (current instanceof BSLParser.MethodCallContext) {
-            BSLParser.MethodCallContext call = (BSLParser.MethodCallContext) current;
-            
-            String functionName = call.methodName().getText().toLowerCase();
-            
-            return ignoredFunctions.contains(functionName);
+      
+      if (current instanceof BSLParser.MethodCallContext) {
+        BSLParser.MethodCallContext call = (BSLParser.MethodCallContext) current;
+        if (call.methodName() != null) {
+          String functionName = call.methodName().getText().trim().toLowerCase();
+          if (ignoredFunctions.contains(functionName)) {
+            return true;
+          }
         }
+      }
+      
+      // Глобальные функции (например, Дата(2026))
+      if (current instanceof BSLParser.GlobalMethodCallContext) {
+        String functionName = current.getChild(0).getText().trim().toLowerCase();
+        if (ignoredFunctions.contains(functionName)) {
+          return true;
+        }
+      }
 
-        if (current instanceof BSLParser.StatementContext) {
-            break;
-        }
-        current = current.getParent();
+      if (current instanceof BSLParser.StatementContext) {
+        break;
+      }
+      
+      current = current.getParent();
     }
     return false;
   }
