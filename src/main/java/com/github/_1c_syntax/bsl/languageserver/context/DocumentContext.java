@@ -21,6 +21,7 @@
  */
 package com.github._1c_syntax.bsl.languageserver.context;
 
+import com.github._1c_syntax.bsl.languageserver.configuration.Language;
 import com.github._1c_syntax.bsl.languageserver.configuration.LanguageServerConfiguration;
 import com.github._1c_syntax.bsl.languageserver.context.computer.CognitiveComplexityComputer;
 import com.github._1c_syntax.bsl.languageserver.context.computer.ComplexityData;
@@ -30,9 +31,10 @@ import com.github._1c_syntax.bsl.languageserver.context.computer.DiagnosticCompu
 import com.github._1c_syntax.bsl.languageserver.context.computer.DiagnosticIgnoranceComputer;
 import com.github._1c_syntax.bsl.languageserver.context.computer.QueryComputer;
 import com.github._1c_syntax.bsl.languageserver.context.computer.SymbolTreeComputer;
+import com.github._1c_syntax.bsl.languageserver.context.symbol.EventHandlerClassifier;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.MethodSymbol;
+import com.github._1c_syntax.bsl.languageserver.context.symbol.SelfMemberClassifier;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.SymbolTree;
-import com.github._1c_syntax.bsl.languageserver.utils.MdoRefBuilder;
 import com.github._1c_syntax.bsl.languageserver.utils.Trees;
 import com.github._1c_syntax.bsl.mdo.MD;
 import com.github._1c_syntax.bsl.parser.BSLLexer;
@@ -40,9 +42,7 @@ import com.github._1c_syntax.bsl.parser.BSLParser;
 import com.github._1c_syntax.bsl.parser.BSLTokenizer;
 import com.github._1c_syntax.bsl.parser.SDBLTokenizer;
 import com.github._1c_syntax.bsl.support.SupportVariant;
-import com.github._1c_syntax.bsl.types.ConfigurationSource;
 import com.github._1c_syntax.bsl.types.ModuleType;
-import com.github._1c_syntax.bsl.types.ScriptVariant;
 import com.github._1c_syntax.utils.Lazy;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -50,7 +50,6 @@ import lombok.Locked;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.antlr.v4.runtime.Token;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.Position;
@@ -61,10 +60,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -99,20 +102,48 @@ public class DocumentContext implements Comparable<DocumentContext> {
   @Nullable
   private String content;
 
+  /**
+   * Отпечаток последнего разобранного содержимого; {@code null}, пока документ не
+   * разбирался ни разу. В отличие от самого содержимого переживает освобождение
+   * вторичных данных: по нему повторный разбор отличает перечитывание того же текста
+   * от настоящей правки.
+   */
+  @Nullable
+  private byte[] contentFingerprint;
+
+  /**
+   * Отличалось ли содержимое, с которым документ разобран последний раз, от того,
+   * с которым он был разобран до этого. У документа, разбираемого впервые, — {@code true}.
+   */
+  @Getter
+  private boolean contentChangedOnLastRebuild = true;
+
   @Getter
   private int version;
 
-  @Setter(onMethod_ = {@Autowired})
-  private ServerContext context;
+  private final ServerContext context;
+  @SuppressWarnings("NullAway.Init")
   @Setter(onMethod_ = {@Autowired})
   private DiagnosticComputer diagnosticComputer;
-  @Setter(onMethod_ = {@Autowired})
-  private LanguageServerConfiguration configuration;
 
+  @SuppressWarnings("NullAway.Init")
   @Setter(onMethod_ = {@Autowired})
   private ObjectProvider<CognitiveComplexityComputer> cognitiveComplexityComputerProvider;
+  @SuppressWarnings("NullAway.Init")
   @Setter(onMethod_ = {@Autowired})
   private ObjectProvider<CyclomaticComplexityComputer> cyclomaticComplexityComputerProvider;
+
+  @SuppressWarnings("NullAway.Init")
+  @Setter(onMethod_ = {@Autowired})
+  private OScriptModuleTypeResolver oScriptModuleTypeResolver;
+
+  @SuppressWarnings("NullAway.Init")
+  @Setter(onMethod_ = {@Autowired})
+  private SelfMemberClassifier selfMemberClassifier;
+
+  @SuppressWarnings("NullAway.Init")
+  @Setter(onMethod_ = {@Autowired})
+  private EventHandlerClassifier eventHandlerClassifier;
 
   @Nullable
   private BSLTokenizer tokenizer;
@@ -131,6 +162,12 @@ public class DocumentContext implements Comparable<DocumentContext> {
 
   private final Lazy<String[]> contentList = new Lazy<>(this::computeContentList, computeLock);
   private final Lazy<ModuleType> moduleType = new Lazy<>(this::computeModuleType, computeLock);
+  // MD-объект и mdoRef документа зависят только от его URI и конфигурации (не от содержимого),
+  // а конфигурация инвариантна на всё время жизни DocumentContext (её перезагрузка в
+  // ServerContext.clear() выбрасывает все документы). Поэтому намеренно НЕ сбрасываются в
+  // clearSecondaryData — считаются один раз на жизнь документа.
+  private final Lazy<Optional<MD>> mdObject = new Lazy<>(this::computeMdObject, computeLock);
+  private final Lazy<String> mdoRef = new Lazy<>(this::computeMdoRef, computeLock);
   private final Lazy<ComplexityData> cognitiveComplexityData
     = new Lazy<>(this::computeCognitiveComplexity, computeLock);
   private final Lazy<ComplexityData> cyclomaticComplexityData
@@ -142,8 +179,9 @@ public class DocumentContext implements Comparable<DocumentContext> {
 
   private final Lazy<List<SDBLTokenizer>> queries = new Lazy<>(this::computeQueries, computeLock);
 
-  public DocumentContext(URI uri) {
+  public DocumentContext(URI uri, ServerContext context) {
     this.uri = uri;
+    this.context = context;
     this.fileType = computeFileType(uri);
   }
 
@@ -216,20 +254,25 @@ public class DocumentContext implements Comparable<DocumentContext> {
   }
 
   public Locale getScriptVariantLocale() {
-    var mdConfiguration = getServerContext().getConfiguration();
+    return getScriptVariantLanguage().getLocale();
+  }
 
-    String languageTag;
-    if (mdConfiguration.getConfigurationSource() == ConfigurationSource.EMPTY || fileType == FileType.OS) {
-      languageTag = configuration.getLanguage().getLanguageCode();
-    } else {
-      var scriptVariant = mdConfiguration.getScriptVariant();
-      if (scriptVariant != ScriptVariant.UNKNOWN) {
-        languageTag = scriptVariant.shortName();
-      } else {
-        throw new IllegalArgumentException("Unknown scriptVariant " + scriptVariant);
-      }
+  /**
+   * Язык исходников проекта: для конфигурации с заданным {@code ScriptVariant} —
+   * именно он (русский/английский); для OS-файлов и проектов без mdclasses-конфы —
+   * {@link LanguageServerConfiguration#getLanguage()}.
+   * <p>
+   * Этот язык — преобладающий в коде. Completion/format/canonicalization keyword'ов
+   * пишут именно в нём, чтобы соответствовать стилю проекта (а не персональным
+   * настройкам интерфейса).
+   */
+  public Language getScriptVariantLanguage() {
+    if (fileType == FileType.OS) {
+      // Единственная поправка документа к языку проекта: OneScript-файл к конфигурации
+      // не относится, и её ScriptVariant про него ничего не говорит.
+      return getServerContext().getLanguageServerConfiguration().getLanguage();
     }
-    return Locale.forLanguageTag(languageTag);
+    return getServerContext().getScriptVariantLanguage();
   }
 
   public MetricStorage getMetrics() {
@@ -257,7 +300,7 @@ public class DocumentContext implements Comparable<DocumentContext> {
   }
 
   public Optional<MD> getMdObject() {
-    return getServerContext().getConfiguration().findChild(getUri());
+    return mdObject.getOrCompute();
   }
 
   /**
@@ -267,7 +310,7 @@ public class DocumentContext implements Comparable<DocumentContext> {
    * @return Строковое представление ссылки
    */
   public String getMdoRef() {
-    return MdoRefBuilder.getMdoRef(this);
+    return mdoRef.getOrCompute();
   }
 
   public List<SDBLTokenizer> getQueries() {
@@ -276,6 +319,20 @@ public class DocumentContext implements Comparable<DocumentContext> {
 
   public List<Diagnostic> getDiagnostics() {
     return diagnostics.getOrCompute();
+  }
+
+  /**
+   * Сбрасывает закэшированные диагностики. Нужно, когда внешний триггер
+   * (например, регистрация конфигурационных типов) меняет результат
+   * вычисления диагностик, а содержимое документа не поменялось.
+   */
+  public void clearDiagnostics() {
+    diagnosticsLock.lock();
+    try {
+      diagnostics.clear();
+    } finally {
+      diagnosticsLock.unlock();
+    }
   }
 
   public List<Diagnostic> getComputedDiagnostics() {
@@ -297,14 +354,25 @@ public class DocumentContext implements Comparable<DocumentContext> {
 
     try {
 
+      var fingerprint = contentFingerprint(content);
+      var contentChanged = !Arrays.equals(fingerprint, contentFingerprint);
+
       boolean versionMatches = version == this.version && version != 0;
 
       if (versionMatches && (this.content != null)) {
+        // Содержимое не применяется — дерево остаётся прежним. Значит и отпечаток обязан
+        // описывать его, а не то, что пришло: иначе следующий разбор того же текста счёл бы
+        // документ неизменившимся, и записи, построенные по прежнему дереву, остались бы жить.
+        contentChangedOnLastRebuild = false;
         clearDependantData();
         return;
       }
 
-      if (!isComputedDataFrozen) {
+      // Заморозка — политика («этот документ не редактируют, его вторичные данные держим»),
+      // а изменение содержимого — факт. Факт сильнее: замороженным остаётся документ, который
+      // после наполнения области перечитали из-за правки файла на диске, и его прежние
+      // диагностики с метриками посчитаны уже по другому тексту.
+      if (!isComputedDataFrozen || contentChanged) {
         clearSecondaryData();
       }
 
@@ -317,17 +385,44 @@ public class DocumentContext implements Comparable<DocumentContext> {
       this.version = version;
       symbolTree = computeSymbolTree();
 
+      // Отпечаток запоминается последним, когда содержимое уже применено и дерево построено:
+      // сорвавшийся разбор не должен выглядеть состоявшимся, иначе повторная попытка сочтёт
+      // текст прежним и работу не переделает.
+      contentFingerprint = fingerprint;
+      contentChangedOnLastRebuild = contentChanged;
+
     } finally {
       releaseLocks();
     }
 
   }
 
+  /**
+   * Отпечаток содержимого — криптографическая свёртка текста.
+   * <p>
+   * Разрядность здесь важна: по совпадению отпечатков документ считается неизменившимся
+   * и сохраняет посчитанные по нему записи. У {@code String.hashCode()} всего 32 бита, и
+   * совпадения у него не редкость, а конструируемое свойство — {@code "Aa"} и {@code "BB"}
+   * равны по нему при равной длине. Ошибка в эту сторону тихая: правку не заметят, и
+   * записи останутся от прежнего текста.
+   *
+   * @param content содержимое документа.
+   * @return отпечаток.
+   */
+  private static byte[] contentFingerprint(String content) {
+    try {
+      return MessageDigest.getInstance("SHA-256").digest(content.getBytes(StandardCharsets.UTF_8));
+    } catch (NoSuchAlgorithmException e) {
+      // SHA-256 обязателен для любой реализации Java, поэтому сюда попасть нельзя.
+      throw new IllegalStateException(e);
+    }
+  }
+
   protected void rebuildFromFileSystem() {
     try {
-      var newContent = FileUtils.readFileToString(new File(uri), StandardCharsets.UTF_8);
+      var newContent = Files.readString(Path.of(uri), StandardCharsets.UTF_8);
       rebuild(newContent, 0);
-    } catch (IOException e) {
+    } catch (IOException | IllegalArgumentException e) {
       LOGGER.error("Can't rebuild content from uri", e);
     }
   }
@@ -341,6 +436,7 @@ public class DocumentContext implements Comparable<DocumentContext> {
       contentList.clear();
       tokenizer = null;
       queries.clear();
+      moduleType.clear();
       clearDependantData();
 
       if (!isComputedDataFrozen) {
@@ -394,12 +490,24 @@ public class DocumentContext implements Comparable<DocumentContext> {
   }
 
   private SymbolTree computeSymbolTree() {
-    return new SymbolTreeComputer(this).compute();
+    return new SymbolTreeComputer(this, selfMemberClassifier, eventHandlerClassifier).compute();
   }
 
 
   private ModuleType computeModuleType() {
-    return context.getConfiguration().getModuleTypeByURI(uri);
+    var fromConfiguration = context.getConfiguration().getModuleTypeByURI(uri);
+    if (fromConfiguration != ModuleType.UNKNOWN) {
+      return fromConfiguration;
+    }
+    return oScriptModuleTypeResolver.resolve(uri).orElse(fromConfiguration);
+  }
+
+  private Optional<MD> computeMdObject() {
+    return getServerContext().getConfiguration().findChild(getUri());
+  }
+
+  private String computeMdoRef() {
+    return MdoRefBuilder.getMdoRef(this);
   }
 
   private ComplexityData computeCognitiveComplexity() {

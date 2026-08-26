@@ -1,4 +1,6 @@
 import org.apache.tools.ant.filters.EscapeUnicode
+import org.gradle.api.file.DuplicatesStrategy
+import org.gradle.api.tasks.bundling.Jar
 import org.jreleaser.model.Active.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -9,21 +11,21 @@ plugins {
     jacoco
     id("com.diffplug.spotless") version "7.0.4"
     id("me.qoomon.git-versioning") version "6.4.4"
-    id("io.freefair.lombok") version "9.2.0"
-    id("io.freefair.javadoc-links") version "9.2.0"
-    id("io.freefair.javadoc-utf-8") version "9.2.0"
-    id("io.freefair.aspectj.post-compile-weaving") version "9.2.0"
-    // id("io.freefair.maven-central.validate-poms") version "9.0.0" // TODO: Re-enable when compatible with Gradle 9
-    id("com.github.ben-manes.versions") version "0.53.0"
-    id("org.springframework.boot") version "4.0.1"
+    id("io.freefair.lombok") version "9.5.0"
+    id("io.freefair.javadoc-links") version "9.5.0"
+    id("io.freefair.javadoc-utf-8") version "9.5.0"
+    id("io.freefair.aspectj.post-compile-weaving") version "9.5.0"
+    id("io.freefair.maven-central.validate-poms") version "9.5.0"
+    id("com.github.ben-manes.versions") version "0.61.0"
+    id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
-    id("io.sentry.jvm.gradle") version "6.3.0"
-    id("io.github.1c-syntax.bslls-dev-tools") version "0.8.1"
+    id("io.sentry.jvm.gradle") version "6.19.0"
+    id("io.github.1c-syntax.bslls-dev-tools") version "0.8.2"
     id("ru.vyarus.pom") version "3.0.0"
-    id("org.jreleaser") version "1.23.0"
-    id("org.sonarqube") version "7.2.3.7755"
+    id("org.jreleaser") version "1.25.0"
+    id("org.sonarqube") version "7.4.0.8496"
     id("me.champeau.jmh") version "0.7.3"
-    id("com.gorylenko.gradle-git-properties") version "2.5.7"
+    id("com.gorylenko.gradle-git-properties") version "4.0.1"
 }
 
 repositories {
@@ -31,28 +33,30 @@ repositories {
     mavenCentral()
     maven(url = "https://projectlombok.org/edge-releases")
     maven("https://central.sonatype.com/repository/maven-snapshots")
+    maven(url = "https://repo.spring.io/milestone")
 }
+
 
 group = "io.github.1c-syntax"
 gitVersioning.apply {
     refs {
         describeTagFirstParent = false
         tag("v(?<tagVersion>[0-9].*)") {
-            version = $$"${ref.tagVersion}${dirty}"
+            version = "\${ref.tagVersion}\${dirty}"
         }
 
         branch("develop") {
-            version = $$"${describe.tag.version}." +
-                    $$"${describe.distance}-SNAPSHOT${dirty}"
+            version = "\${describe.tag.version}." +
+                    "\${describe.distance}-SNAPSHOT\${dirty}"
         }
 
         branch(".+") {
-            version = $$"${ref}-${commit.short}${dirty}"
+            version = "\${ref}-\${commit.short}\${dirty}"
         }
     }
 
     rev {
-        version = $$"${commit.short}${dirty}"
+        version = "\${commit.short}\${dirty}"
     }
 }
 
@@ -60,7 +64,7 @@ gitProperties {
     customProperty("git.build.time", buildTime())
 }
 
-val languageToolVersion = "6.7"
+val languageToolVersion = "6.8"
 
 dependencies {
 
@@ -71,25 +75,36 @@ dependencies {
     api("org.springframework.boot:spring-boot-starter-websocket")
     api("org.springframework.boot:spring-boot-starter-cache")
 
+    api("io.micrometer:context-propagation")
+
     api("info.picocli:picocli-spring-boot-starter:4.7.7")
 
     // кэширование
-    api("com.github.ben-manes.caffeine:caffeine:3.2.3")
-    api("org.ehcache:ehcache:3.11.1")
+    api("com.github.ben-manes.caffeine:caffeine:3.2.4")
+    api("org.ehcache:ehcache:3.12.0")
 
     // lsp4j core
-    api("org.eclipse.lsp4j:org.eclipse.lsp4j:0.24.0")
-    api("org.eclipse.lsp4j:org.eclipse.lsp4j.websocket.jakarta:0.24.0")
+    api("org.eclipse.lsp4j:org.eclipse.lsp4j:1.0.0")
+    api("org.eclipse.lsp4j:org.eclipse.lsp4j.websocket.jakarta:1.0.0")
+
+    // Spring AI MCP (Model Context Protocol) server starters.
+    // Spring AI 2.0 is the first line compatible with Spring Boot 4 (milestone at the time of writing).
+    // - core starter: STDIO transport (`mcp` subcommand);
+    // - webmvc starter: Streamable HTTP transport, served on the same servlet container as LSP-over-WS.
+    api(platform("org.springframework.ai:spring-ai-bom:2.0.1"))
+    api("org.springframework.ai:spring-ai-starter-mcp-server")
+    api("org.springframework.ai:spring-ai-starter-mcp-server-webmvc")
 
     // 1c-syntax
-    api("io.github.1c-syntax:bsl-parser:0.32.0")
-    api("io.github.1c-syntax:utils:0.7.0")
-    api("io.github.1c-syntax:mdclasses:0.18.0")
-    api("io.github.1c-syntax:bsl-common-library:0.10.0")
-    api("io.github.1c-syntax:supportconf:0.16.0")
+    api("io.github.1c-syntax:bsl-parser:0.39.0")
+    api("io.github.1c-syntax:utils:0.10.1")
+    api("io.github.1c-syntax:mdclasses:0.19.0.82-SNAPSHOT")
+    api("io.github.1c-syntax:bsl-common-library:0.12.4")
+    api("io.github.1c-syntax:supportconf:0.17.1")
+    api("io.github.1c-syntax:bsl-context:0.9.2")
 
     // nullability annotations
-    api("org.jspecify:jspecify:1.0.0")
+    api("org.jspecify:jspecify:1.0.1")
 
     // JLanguageTool
     implementation("org.languagetool:languagetool-core:$languageToolVersion") {
@@ -112,14 +127,17 @@ dependencies {
     implementation("org.aspectj:aspectjrt:1.9.25.1")
 
     // commons utils
-    implementation("commons-io:commons-io:2.21.0")
+    implementation("commons-io:commons-io:2.22.0")
     implementation("commons-beanutils:commons-beanutils:1.11.0") {
         exclude("commons-logging", "commons-logging")
     }
-    implementation("commons-codec:commons-codec:1.21.0")
+    implementation("commons-codec:commons-codec:1.22.1")
     implementation("org.apache.commons:commons-lang3:3.20.0")
-    implementation("org.apache.commons:commons-collections4:4.5.0")
+    implementation("org.apache.commons:commons-collections4:4.6.0")
     implementation("org.apache.commons:commons-exec:1.6.0")
+
+    // JGit
+    implementation("org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r")
 
     // progress bar
     implementation("me.tongfei:progressbar:0.10.2")
@@ -130,7 +148,7 @@ dependencies {
     implementation("io.leangen.geantyref:geantyref:2.0.1")
 
     // graphs
-    implementation("org.jgrapht:jgrapht-core:1.5.2")
+    implementation("org.jgrapht:jgrapht-core:1.5.3")
 
     // SARIF serialization
     implementation("com.contrastsecurity:java-sarif:2.0")
@@ -138,7 +156,7 @@ dependencies {
     // CONSTRAINTS
     implementation("com.google.guava:guava") {
         version {
-            strictly("33.5.0-jre")
+            strictly("33.6.0-jre")
         }
     }
 
@@ -154,8 +172,11 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
 
     // test utils
-    testImplementation("com.github.hazendaz.jmockit:jmockit:2.1.0")
+    testImplementation("com.github.hazendaz.jmockit:jmockit:2.3.0")
     testImplementation("org.awaitility:awaitility:4.3.0")
+
+    // архитектурные тесты (проверка конвенций именования/аннотаций/зависимостей)
+    testImplementation("com.tngtech.archunit:archunit-junit6:1.5.0")
 
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
@@ -175,7 +196,7 @@ tasks.withType<JavaCompile> {
 
 tasks.jar {
     manifest {
-        attributes["Main-Class"] = "com.github._1c_syntax.bsl.languageserver.BSLLSPLauncher"
+        attributes["Main-Class"] = "com.github._1c_syntax.bsl.languageserver.MainApplication"
         attributes["Implementation-Version"] = archiveVersion.get()
     }
     enabled = true
@@ -204,7 +225,9 @@ afterEvaluate {
         dependsOn(tasks.collectExternalDependenciesForSentry)
     }
 
-    tasks.named("sourcesJar") {
+    tasks.named<Jar>("sourcesJar") {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        dependsOn(tasks.generateGitProperties)
         dependsOn(tasks.generateSentryDebugMetaPropertiesjava)
         dependsOn(tasks.collectExternalDependenciesForSentry)
     }
@@ -225,8 +248,35 @@ tasks.test {
         html.required.set(true)
     }
 
-    // Increase heap size to prevent OOM during test execution with EhCache
-    maxHeapSize = "2g"
+    val isCi = System.getenv("CI") == "true" || System.getenv("GITHUB_ACTIONS") == "true"
+
+    // Increase heap size to prevent OOM during test execution.
+    // With CleanupContextBeforeClassAndAfterClass tests causing frequent Spring context reloads,
+    // multiple contexts can be in memory simultaneously (old being GC'd while new is created).
+    //
+    // На CI все 650+ классов идут в одном форке, и туда же попадает импорт всех классов
+    // проекта в ArchitectureTest (ArchUnit строит граф целиком). Когда он выпадает после
+    // серии перезагрузок контекста, 3g перестаёт хватать: `build (25, ubuntu-latest)`
+    // валился `OutOfMemoryError: Java heap space` в `ClassGraphCreator`. У раннера 16 ГБ,
+    // форк один — 4g снимают вопрос. Локально форков до четырёх, поэтому там остаётся 3g:
+    // 4 × 4g не влезут в машину с 16 ГБ.
+    maxHeapSize = if (isCi) "4g" else "3g"
+
+    // Параллельное выполнение тестов JUnit на уровне процессов (форков JVM).
+    // Использование форков, а не потоков, обусловлено тем, что многие тесты
+    // изменяют общее состояние Spring-контекста (@DirtiesContext,
+    // @CleanupContextBeforeClassAndAfterClass) и статические кэши, поэтому
+    // потоковая параллельность внутри одной JVM небезопасна. Каждый форк —
+    // изолированная JVM со своим Spring-контекстом.
+    //
+    // Уровень параллелизма можно переопределить Gradle-свойством
+    // `maxParallelForks` (например, `-PmaxParallelForks=4`). По умолчанию
+    // на CI (env `CI=true` / `GITHUB_ACTIONS=true`) используется один форк,
+    // чтобы не упереться в OOM при `maxHeapSize=3g` на каждый форк.
+    // Локально — половина доступных процессоров, ограниченная диапазоном
+    // от 1 до 4.
+    maxParallelForks = (project.findProperty("maxParallelForks") as String?)?.toIntOrNull()
+        ?: if (isCi) 1 else (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
 
     val jmockitPath = classpath.find { it.name.contains("jmockit") }!!.absolutePath
     val mockitoAgentPath = classpath.find { it.name.contains("mockito-core") }!!.absolutePath
@@ -272,6 +322,19 @@ jmh {
     jmhVersion = "1.37"
 }
 
+// Дерево зависимостей проекта даёт в jmh-архиве больше 65535 записей — нужен zip64.
+tasks.named<Jar>("jmhJar") {
+    isZip64 = true
+}
+
+// Грамматики bsl-parser собраны форком ANTLR (io.github.1c-syntax:antlr4) с несовместимой
+// версией сериализации ATN. В обычном classpath выигрывает форк, а при склейке uber-jar
+// классы апстрима затирают форковые, и разбор падает на "Could not deserialize ATN with
+// version 3 (expected 4)". Апстримный рантайм в jmh не нужен — исключаем его.
+configurations.named("jmhRuntimeClasspath") {
+    exclude(group = "org.antlr", module = "antlr4-runtime")
+}
+
 sentry {
     org.set("1c-syntax")
     projectName.set("bsl-language-server")
@@ -308,13 +371,20 @@ tasks.generateDiagnosticDocs {
 }
 
 tasks.javadoc {
+    // Вложенные CLAUDE.md лежат рядом с исходниками; delombok копирует их в сгенерированные
+    // сорсы, и javadoc спотыкается о них ("Illegal package name"). Исключаем не-java файлы.
+    exclude("**/*.md")
+
     options {
         this as StandardJavadocDocletOptions
         links(
             "https://1c-syntax.github.io/bsl-parser/dev/javadoc",
             "https://1c-syntax.github.io/mdclasses/dev/javadoc",
-            "https://javadoc.io/doc/org.antlr/antlr4-runtime/latest"
+            "https://1c-syntax.github.io/antlr/javadoc/"
         )
+        // Проверяем корректность javadoc (битые ссылки, синтаксис, html),
+        // но не требуем наличия комментариев у каждого элемента (группа missing).
+        addBooleanOption("Xdoclint:all,-missing", true)
     }
 }
 

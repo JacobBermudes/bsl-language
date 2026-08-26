@@ -228,6 +228,161 @@ class BslDocSemanticTokensSupplierTest {
   }
 
   @Test
+  void testElementsInDescriptionStartingAtNonZeroColumn() {
+    // given - описание с отступом, то есть начинающееся не с начала строки.
+    String bsl = """
+          // Параметры:
+          //  Парам - Строка - описание
+          Процедура Тест(Парам)
+          КонецПроцедуры
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokens(bsl, supplier);
+
+    // then: ключевое слово подсвечивается по своей реальной позиции — с учётом отступа
+    // (столбец 7 = четыре пробела, «//» и пробел), а не со столбца 3.
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(0, 7, 10, SemanticTokenTypes.Macro,
+        Set.of(SemanticTokenModifiers.Documentation), "Параметры:")
+    ));
+  }
+
+  @Test
+  void testTypeRefinedByHyperlinkHighlightsBothParts() {
+    // given - тип, уточнённый ссылкой: подсвечиваются и голова описания, и сама ссылка,
+    // ровно как подсвечивается отдельно стоящая ссылка.
+    String bsl = """
+      // Параметры:
+      //  Объект - СтрокаТабличнойЧасти: См. Справочник.Справочник1.ТабличнаяЧасть1
+      Процедура Тест(Объект)
+      КонецПроцедуры
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokens(bsl, supplier);
+
+    // then
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(1, 13, 20, SemanticTokenTypes.Type,
+        Set.of(SemanticTokenModifiers.Documentation), "СтрокаТабличнойЧасти"),
+      new ExpectedToken(1, 39, 38, SemanticTokenTypes.Type,
+        Set.of(SemanticTokenModifiers.Documentation), "Справочник.Справочник1.ТабличнаяЧасть1")
+    ));
+  }
+
+  @Test
+  void testTrailingVariableDescriptionTypeHighlighting() {
+    // given - висячий (trailing) комментарий переменной с типом в начале (нотация «тип в начале»).
+    // Описание начинается не со столбца 0, поэтому проверяем сквозную работу:
+    // bsl-parser отдаёт TYPE_NAME-элемент в абсолютных координатах, а сапплаер подсвечивает его
+    // как тип ровно на позиции типа, без «съезжания» из-за отступа описания.
+    String bsl = """
+      Процедура Тест()
+          Перем Стр; // Строка - описание переменной
+      КонецПроцедуры
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokens(bsl, supplier);
+
+    // then - "Строка" подсвечивается как тип на позиции 18 (а не со смещением на отступ описания).
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(1, 18, 6, SemanticTokenTypes.Type,
+        Set.of(SemanticTokenModifiers.Documentation), "Строка")
+    ));
+  }
+
+  @Test
+  void testOsVariableDescriptionPrimitiveTypeHighlighting() {
+    // given - описание переменной OneScript-модуля с примитивом в начале. Примитивы объявлены
+    // только BSL-паком, поэтому при регистрации их видимости строго по языку пака
+    // TypeService.resolve в OS-файле не находил тип, и вся строка описания уезжала
+    // одним комментарием.
+    String os = """
+      // Строка - Ключ владельца, удерживающего блокировку записи.
+      Перем ВладелецЗаписи;
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokensForOs(os, supplier);
+
+    // then - «Строка» подсвечена как тип, ровно как в BSL-модуле
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(0, 3, 6, SemanticTokenTypes.Type,
+        Set.of(SemanticTokenModifiers.Documentation), "Строка")
+    ));
+  }
+
+  @Test
+  void testTrailingVariableDescriptionUnresolvedTypeNotHighlighted() {
+    // given - висячий комментарий, у которого первый токен (по нотации «тип в начале») — свободный
+    // текст, не резолвящийся в реальный тип.
+    String bsl = """
+      Процедура Тест()
+          Перем П; // привет - это не тип
+      КонецПроцедуры
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokens(bsl, supplier);
+
+    // then - «привет» не подсвечивается как тип: весь висячий комментарий остаётся
+    // одним комментарием-документацией (не разрезается Type-токеном).
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(1, 13, 22, SemanticTokenTypes.Comment,
+        Set.of(SemanticTokenModifiers.Documentation), "// привет - это не тип")
+    ));
+  }
+
+  @Test
+  void testTrailingVariableCollectionTypeHighlighting() {
+    // given - висячий комментарий с типом-коллекцией «Массив из Число»: подсвечиваться должны
+    // и тип-голова (Массив), и тип-значение коллекции (Число), а не только голова.
+    String bsl = """
+      Процедура Тест()
+          Перем Контейнер Экспорт; // Массив из Число
+      КонецПроцедуры
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokens(bsl, supplier);
+
+    // then - и «Массив», и «Число» подсвечены как тип («из» — разделитель, остаётся комментарием).
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(1, 32, 6, SemanticTokenTypes.Type,
+        Set.of(SemanticTokenModifiers.Documentation), "Массив"),
+      new ExpectedToken(1, 42, 5, SemanticTokenTypes.Type,
+        Set.of(SemanticTokenModifiers.Documentation), "Число")
+    ));
+  }
+
+  @Test
+  void testMethodReturnCollectionTypeHighlighting() {
+    // given - описание возвращаемого значения метода с типом-коллекцией «Массив из Число».
+    // Парсер отдаёт TYPE_NAME-элементом только тип-голову (Массив), поэтому тип-значение (Число)
+    // подсвечивается из структурных аксессоров типов — иначе светилась бы только голова.
+    String bsl = """
+      // Возвращаемое значение:
+      //  Массив из Число - Массив тестовых чисел.
+      Функция ТестовыеЧисла() Экспорт
+      КонецФункции
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokens(bsl, supplier);
+
+    // then - и «Массив», и «Число» подсвечены как тип; второй «Массив» (в тексте описания)
+    // и разделители остаются комментарием.
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(1, 4, 6, SemanticTokenTypes.Type,
+        Set.of(SemanticTokenModifiers.Documentation), "Массив"),
+      new ExpectedToken(1, 14, 5, SemanticTokenTypes.Type,
+        Set.of(SemanticTokenModifiers.Documentation), "Число")
+    ));
+  }
+
+  @Test
   void testMultilineSupport() {
     // given
     String bsl = """

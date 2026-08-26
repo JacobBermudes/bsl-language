@@ -21,7 +21,7 @@
  */
 package com.github._1c_syntax.bsl.languageserver.aop.sentry;
 
-import com.github._1c_syntax.bsl.languageserver.events.LanguageServerInitializeRequestReceivedEvent;
+import com.github._1c_syntax.bsl.languageserver.events.LanguageServerInitializedEvent;
 import io.sentry.IScope;
 import io.sentry.Sentry;
 import io.sentry.SentryOptions;
@@ -82,14 +82,14 @@ public class SentryScopeConfigurer {
   }
 
   /**
-   * Обработчик события {@link LanguageServerInitializeRequestReceivedEvent}.
+   * Обработчик события {@link LanguageServerInitializedEvent}.
    * <p>
    * Добавляет теги с именем и версией клиента в Sentry scope.
    *
    * @param event Событие инициализации языкового сервера
    */
   @EventListener
-  public void onLanguageServerInitialize(LanguageServerInitializeRequestReceivedEvent event) {
+  public void onLanguageServerInitialize(LanguageServerInitializedEvent event) {
     var clientInfo = Optional.ofNullable(event.getParams().getClientInfo());
     var clientName = clientInfo
       .flatMap(info -> Optional.ofNullable(info.getName()))
@@ -105,12 +105,26 @@ public class SentryScopeConfigurer {
   }
 
   private String getEnvironment() {
-    String version = serverInfo.getVersion();
+    var version = serverInfo.getVersion();
+    // Версия может быть null при запуске без манифеста (из IDE/исходников);
+    // resolveEnvironment ожидает не-null, поэтому неизвестную версию трактуем как feature.
+    return version == null ? "feature" : resolveEnvironment(version);
+  }
+
+  /**
+   * Сопоставляет строку версии сервера со значением environment для Sentry.
+   *
+   * @param version Строка версии сервера, например {@code 1.0.0}, {@code 1.0.0-rc.2} или
+   *                {@code develop-1234}
+   * @return Имя окружения Sentry: {@code production}, {@code pre-release}, {@code develop} или
+   *         {@code feature}
+   */
+  static String resolveEnvironment(String version) {
     String environment;
 
     if (version.matches("\\d+\\.\\d+\\.\\d+")) {
       environment = "production";
-    } else if (version.matches("\\d+\\.\\d+\\.\\d+-r[ca]\\d+")) {
+    } else if (version.matches("\\d+\\.\\d+\\.\\d+-r[ca]\\.?\\d+")) {
       environment = "pre-release";
     } else if (version.startsWith("develop-") && !version.contains("-DIRTY-")) {
       environment = "develop";

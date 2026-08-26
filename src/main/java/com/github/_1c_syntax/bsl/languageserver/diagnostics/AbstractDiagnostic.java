@@ -22,19 +22,29 @@
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticInfo;
+import com.github._1c_syntax.bsl.languageserver.diagnostics.info.DiagnosticInfo;
 import lombok.Getter;
 import lombok.Setter;
 import org.eclipse.lsp4j.Diagnostic;
 
 import java.util.List;
 
+/**
+ * Базовый класс диагностики.
+ * <p>
+ * Управляет жизненным циклом проверки: сбрасывает накопленные диагностики,
+ * запоминает обрабатываемый {@link DocumentContext} и делегирует поиск замечаний
+ * методу {@link #check()}, который реализуют наследники.
+ */
 public abstract class AbstractDiagnostic implements BSLDiagnostic {
 
+  /** Метаинформация о диагностике. */
   @Getter
   @Setter
   protected DiagnosticInfo info;
+  /** Хранилище найденных диагностикой замечаний. */
   protected final DiagnosticStorage diagnosticStorage = new DiagnosticStorage(this);
+  /** Контекст обрабатываемого документа. */
   protected DocumentContext documentContext;
 
   @Override
@@ -45,5 +55,8 @@ public abstract class AbstractDiagnostic implements BSLDiagnostic {
     return diagnosticStorage.getDiagnostics();
   }
 
+  /**
+   * Выполняет проверку документа и наполняет {@link #diagnosticStorage} найденными замечаниями.
+   */
   protected abstract void check();
 }

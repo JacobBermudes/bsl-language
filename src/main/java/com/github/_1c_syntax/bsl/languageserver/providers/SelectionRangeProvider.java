@@ -22,11 +22,14 @@
 package com.github._1c_syntax.bsl.languageserver.providers;
 
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
+import com.github._1c_syntax.bsl.languageserver.utils.Positions;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import com.github._1c_syntax.bsl.languageserver.utils.Trees;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.antlr.v4.runtime.tree.TerminalNode;
+import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.SelectionRange;
 import org.eclipse.lsp4j.SelectionRangeParams;
 import org.jspecify.annotations.Nullable;
@@ -84,10 +87,32 @@ public class SelectionRangeProvider {
 
     // Result must contains all elements from input
     return positions.stream()
-      .map(position -> Trees.findTerminalNodeContainsPosition(ast, position))
-      .map(terminalNode -> terminalNode.orElse(null))
+      .map(position -> findTerminalNodeAtPosition(ast, position))
       .map(SelectionRangeProvider::toSelectionRange)
       .collect(Collectors.toList());
+  }
+
+  @Nullable
+  private static TerminalNode findTerminalNodeAtPosition(ParserRuleContext ast, Position position) {
+    var node = Trees.findTerminalNodeContainsPosition(ast, position).orElse(null);
+    if (node != null && !Positions.create(node).equals(position)) {
+      return node;
+    }
+
+    // Каретка не внутри токена, а на границе (самый частый случай — сразу после идентификатора).
+    // Поиск по позиции содержит начало токена и исключает конец, поэтому отдельно ищем токен,
+    // заканчивающийся ровно в этой позиции, и предпочитаем его.
+    return findTerminalNodeEndingAtPosition(ast, position).orElse(node);
+  }
+
+  private static Optional<TerminalNode> findTerminalNodeEndingAtPosition(ParserRuleContext ast, Position position) {
+    if (position.getCharacter() == 0) {
+      return Optional.empty();
+    }
+
+    var positionInsideToken = new Position(position.getLine(), position.getCharacter() - 1);
+    return Trees.findTerminalNodeContainsPosition(ast, positionInsideToken)
+      .filter(terminalNode -> Positions.createEnd(terminalNode).equals(position));
   }
 
   @Nullable

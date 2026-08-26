@@ -80,9 +80,12 @@ public class CfgBuildingParseTreeVisitor extends BSLParserBaseVisitor<ParseTree>
         var probablyPreprocessor = Trees.getPreviousNode(fileBlock.getParent(), fileBlock,
           BSLParser.RULE_preprocessor);
 
-        if (probablyPreprocessor != fileBlock) {
-          hasTopLevelPreprocessor = true;
-          probablyPreprocessor.accept(this);
+        // Флаг top-level препроцессора должен взводиться только для #Если, который грамматика file
+        // "съедает" в начале модуля. Для оторванных #Иначе/#ИначеЕсли/#КонецЕсли его взводить нельзя,
+        // иначе он протечет на следующий вложенный #Если без парного #КонецЕсли и сломает стек блоков.
+        if (probablyPreprocessor instanceof BSLParser.PreprocessorContext preprocessor) {
+          hasTopLevelPreprocessor = preprocessor.preproc_if() != null;
+          preprocessor.accept(this);
         }
       }
     }
@@ -458,7 +461,7 @@ public class CfgBuildingParseTreeVisitor extends BSLParserBaseVisitor<ParseTree>
 
       hasTopLevelPreprocessor = false;
 
-    } else if (!isStatementLevelPreproc(ctx)) {
+    } else if (!isStatementLevelPreproc(ctx) || !hasMatchingEndIfInSameCodeBlock(ctx)) {
       return super.visitPreproc_if(ctx);
     }
 
@@ -588,6 +591,46 @@ public class CfgBuildingParseTreeVisitor extends BSLParserBaseVisitor<ParseTree>
 
   private static boolean isStatementLevelPreproc(ParserRuleContext ctx) {
     return ctx.getParent().getParent().getRuleIndex() == BSLParser.RULE_statement;
+  }
+
+  private static boolean hasMatchingEndIfInSameCodeBlock(ParserRuleContext preprocIfCtx) {
+    // Find the enclosing codeBlock
+    var statement = preprocIfCtx.getParent().getParent(); // preprocessor -> statement
+    var codeBlock = statement.getParent();
+    if (codeBlock == null) {
+      return false;
+    }
+
+    // Count preproc_if and preproc_endif after this statement in the same codeBlock.
+    // Only check direct preprocessor children of sibling StatementContext nodes to avoid
+    // repeated full-tree traversals on large blocks.
+    boolean foundSelf = false;
+    var depth = 0;
+    for (var child : codeBlock.getChildren()) {
+      if (!foundSelf) {
+        if (child == statement) {
+          foundSelf = true;
+          depth = 1;
+        }
+        continue;
+      }
+
+      if (child instanceof BSLParser.StatementContext statementChild) {
+        var preprocessor = statementChild.preprocessor();
+        if (preprocessor != null) {
+          if (preprocessor.preproc_if() != null) {
+            depth++;
+          } else if (preprocessor.preproc_endif() != null) {
+            depth--;
+            if (depth == 0) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+
+    return false;
   }
 
   private PreprocessorConditionVertex popPreprocCondition() {

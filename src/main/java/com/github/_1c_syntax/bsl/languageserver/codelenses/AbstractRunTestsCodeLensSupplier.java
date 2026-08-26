@@ -21,15 +21,14 @@
  */
 package com.github._1c_syntax.bsl.languageserver.codelenses;
 
+import com.github._1c_syntax.bsl.languageserver.client.ClientCapabilitiesHolder;
 import com.github._1c_syntax.bsl.languageserver.configuration.LanguageServerConfiguration;
 import com.github._1c_syntax.bsl.languageserver.configuration.events.LanguageServerConfigurationChangedEvent;
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
 import com.github._1c_syntax.bsl.languageserver.context.FileType;
-import com.github._1c_syntax.bsl.languageserver.events.LanguageServerInitializeRequestReceivedEvent;
+import com.github._1c_syntax.bsl.languageserver.events.LanguageServerInitializedEvent;
 import com.github._1c_syntax.utils.Absolute;
 import lombok.RequiredArgsConstructor;
-import org.eclipse.lsp4j.ClientInfo;
-import org.eclipse.lsp4j.InitializeParams;
 import org.jspecify.annotations.Nullable;
 import org.springframework.cache.annotation.CacheConfig;
 import org.springframework.cache.annotation.CacheEvict;
@@ -48,11 +47,12 @@ public abstract class AbstractRunTestsCodeLensSupplier<T extends CodeLensData>
   implements CodeLensSupplier<T> {
 
   protected final LanguageServerConfiguration configuration;
+  private final ClientCapabilitiesHolder clientCapabilitiesHolder;
 
   private boolean clientIsSupported;
 
   /**
-   * Обработчик события {@link LanguageServerInitializeRequestReceivedEvent}.
+   * Обработчик события {@link LanguageServerInitializedEvent}.
    * <p>
    * Анализирует тип подключенного клиента и управляет применимостью линзы.
    *
@@ -60,13 +60,8 @@ public abstract class AbstractRunTestsCodeLensSupplier<T extends CodeLensData>
    */
   @EventListener
   @CacheEvict(allEntries = true)
-  public void handleEvent(LanguageServerInitializeRequestReceivedEvent event) {
-    var clientName = Optional.of(event)
-      .map(LanguageServerInitializeRequestReceivedEvent::getParams)
-      .map(InitializeParams::getClientInfo)
-      .map(ClientInfo::getName)
-      .orElse("");
-    clientIsSupported = "Visual Studio Code".equals(clientName);
+  public void handleEvent(LanguageServerInitializedEvent event) {
+    clientIsSupported = clientCapabilitiesHolder.isVsCodeLikeClient();
   }
 
   /**

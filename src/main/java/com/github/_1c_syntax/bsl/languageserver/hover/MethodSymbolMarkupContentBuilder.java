@@ -21,11 +21,15 @@
  */
 package com.github._1c_syntax.bsl.languageserver.hover;
 
+import com.github._1c_syntax.bsl.languageserver.types.TypeService;
+import com.github._1c_syntax.bsl.languageserver.context.symbol.EventMethodSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.MethodSymbol;
+import com.github._1c_syntax.bsl.languageserver.context.symbol.Symbol;
+import com.github._1c_syntax.bsl.languageserver.references.model.Reference;
+import com.github._1c_syntax.bsl.languageserver.types.index.EventContractsIndex;
 import lombok.RequiredArgsConstructor;
 import org.eclipse.lsp4j.MarkupContent;
 import org.eclipse.lsp4j.MarkupKind;
-import org.eclipse.lsp4j.SymbolKind;
 import org.springframework.stereotype.Component;
 
 import java.util.StringJoiner;
@@ -35,20 +39,33 @@ import java.util.StringJoiner;
  */
 @Component
 @RequiredArgsConstructor
-public class MethodSymbolMarkupContentBuilder implements MarkupContentBuilder<MethodSymbol> {
+public class MethodSymbolMarkupContentBuilder implements MarkupContentBuilder {
+
   private final DescriptionFormatter descriptionFormatter;
+  private final TypeService typeService;
+  private final EventContractFormatter eventContractFormatter;
+  private final EventContractsIndex eventContractsIndex;
+  private final PlatformMetadataRenderer metadataRenderer;
 
   @Override
-  public MarkupContent getContent(MethodSymbol symbol) {
+  public MarkupContent getContent(Reference reference) {
+    var symbol = (MethodSymbol) reference.symbol();
     var markupBuilder = new StringJoiner("\n");
 
     // сигнатура
     // местоположение метода
+    // признак устаревания
     // описание метода
     // параметры
     // возвращаемое значение
     // примеры
     // варианты вызова
+
+    var eventContract = eventContractsIndex.getContract(symbol.getOwner(), symbol.getName());
+    // Обработчик события определяем по классифицированному виду символа (EventMethodSymbol),
+    // а не только по наличию контракта: конструктор OScript-класса (ПриСозданииОбъекта) может
+    // совпасть с событием, но остаётся конструктором и в hover'е показывается как обычный метод.
+    var isEventHandler = symbol instanceof EventMethodSymbol && eventContract.isPresent();
 
     // сигнатура
     var signature = descriptionFormatter.getSignature(symbol);
@@ -58,16 +75,41 @@ public class MethodSymbolMarkupContentBuilder implements MarkupContentBuilder<Me
     var methodLocation = descriptionFormatter.getLocation(symbol);
     descriptionFormatter.addSectionIfNotEmpty(markupBuilder, methodLocation);
 
-    // описание метода
-    var purposeSection = descriptionFormatter.getPurposeSection(symbol);
-    descriptionFormatter.addSectionIfNotEmpty(markupBuilder, purposeSection);
+    // признак устаревания
+    var deprecatedSection = descriptionFormatter.getDeprecatedSection(symbol);
+    descriptionFormatter.addSectionIfNotEmpty(markupBuilder, deprecatedSection);
 
-    // параметры
-    var parametersSection = descriptionFormatter.getParametersSection(symbol);
+    // признак "обработчик события платформы" + платформенное описание события +
+    // пользовательское purpose из шапки метода (если метод — обработчик)
+    if (isEventHandler) {
+      descriptionFormatter.addSectionIfNotEmpty(markupBuilder,
+        eventContractFormatter.getEventHandlerSection(symbol, eventContract.get()));
+    } else {
+      // описание метода для обычного метода
+      var purposeSection = descriptionFormatter.getPurposeSection(symbol);
+      descriptionFormatter.addSectionIfNotEmpty(markupBuilder, purposeSection);
+    }
+
+    // параметры: для обработчика — контракт события (имена/типы), иначе —
+    // шапка-комментарий пользователя
+    var parametersSection = isEventHandler
+      ? eventContractFormatter.getParametersSection(symbol, eventContract.get())
+      : descriptionFormatter.getParametersSection(symbol);
     descriptionFormatter.addSectionIfNotEmpty(markupBuilder, parametersSection);
 
-    // возвращаемое значение
+    // возвращаемое значение: описанное автором, а если он ничего не написал — выведенное
+    // по коду. Когда код возвращает что-то сверх описанного, расхождение показывается
+    // отдельной припиской: описание могло устареть, а работает код по своему возврату.
+    var returnTypes = typeService.getReturnTypes(symbol);
     var returnedValueSection = descriptionFormatter.getReturnedValueSection(symbol);
+    if (returnedValueSection.isEmpty()) {
+      returnedValueSection = descriptionFormatter.getInferredReturnedValueSection(returnTypes);
+    } else {
+      var note = descriptionFormatter.getInferredReturnedValueNote(symbol, returnTypes);
+      if (!note.isEmpty()) {
+        returnedValueSection = returnedValueSection + "\n\n" + note;
+      }
+    }
     descriptionFormatter.addSectionIfNotEmpty(markupBuilder, returnedValueSection);
 
     // примеры
@@ -78,14 +120,22 @@ public class MethodSymbolMarkupContentBuilder implements MarkupContentBuilder<Me
     var callOptionsSection = descriptionFormatter.getCallOptionsSection(symbol);
     descriptionFormatter.addSectionIfNotEmpty(markupBuilder, callOptionsSection);
 
+    // метаданные платформенного события (замечание, пример, «см. также», доступность/версии)
+    // из дескриптора контракта — так же, как их рисуют PlatformMemberHoverBuilder и
+    // ConstructorHoverBuilder для платформенных членов и конструкторов. Только у обработчика.
+    if (isEventHandler) {
+      var eventMetadata = new StringBuilder();
+      metadataRenderer.append(eventMetadata, eventContract.get().metadata());
+      descriptionFormatter.addSectionIfNotEmpty(markupBuilder, eventMetadata.toString().strip());
+    }
+
     var content = markupBuilder.toString();
 
     return new MarkupContent(MarkupKind.MARKDOWN, content);
   }
 
   @Override
-  public SymbolKind getSymbolKind() {
-    return SymbolKind.Method;
+  public Class<? extends Symbol> getSymbolClass() {
+    return MethodSymbol.class;
   }
-
 }

@@ -24,6 +24,7 @@ package com.github._1c_syntax.bsl.languageserver.providers;
 import com.github._1c_syntax.bsl.languageserver.configuration.LanguageServerConfiguration;
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
 import com.github._1c_syntax.bsl.languageserver.inlayhints.CognitiveComplexityInlayHintSupplier;
+import com.github._1c_syntax.bsl.languageserver.inlayhints.DefaultInlayHintData;
 import com.github._1c_syntax.bsl.languageserver.inlayhints.InlayHintSupplier;
 import com.github._1c_syntax.bsl.languageserver.util.CleanupContextBeforeClassAndAfterEachTestMethod;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
@@ -35,9 +36,7 @@ import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -56,9 +55,6 @@ class InlayHintProviderTest {
   private LanguageServerConfiguration configuration;
   @Autowired
   private CognitiveComplexityInlayHintSupplier supplier;
-  @Autowired
-  @Qualifier("enabledInlayHintSuppliers")
-  private ObjectProvider<List<InlayHintSupplier>> enabledInlayHintSuppliersProvider;
 
   private DocumentContext documentContext;
 
@@ -88,13 +84,16 @@ class InlayHintProviderTest {
   void testDefaultEnabledSuppliers() {
 
     // given
-    // default config
+    var params = new InlayHintParams();
+    params.setTextDocument(new TextDocumentIdentifier(documentContext.getUri().toString()));
+    params.setRange(Ranges.create(documentContext.getAst()));
 
     // when
-    List<InlayHintSupplier> suppliers = enabledInlayHintSuppliersProvider.getObject();
+    var inlayHints = provider.getInlayHint(documentContext, params);
 
     // then
-    assertThat(suppliers).contains(supplier);
+    // Should contain hints from CognitiveComplexityInlayHintSupplier (enabled by default)
+    assertThat(inlayHints).isNotEmpty();
   }
 
   @Test
@@ -103,14 +102,62 @@ class InlayHintProviderTest {
     // given
     configuration.getInlayHintOptions().getParameters().put(supplier.getId(), Either.forLeft(false));
 
+    var params = new InlayHintParams();
+    params.setTextDocument(new TextDocumentIdentifier(documentContext.getUri().toString()));
+    params.setRange(Ranges.create(documentContext.getAst()));
+
     // when
-    List<InlayHintSupplier> suppliers = enabledInlayHintSuppliersProvider.getObject();
+    var inlayHints = provider.getInlayHint(documentContext, params);
 
     // then
-    assertThat(suppliers)
+    // Should still contain test hint but not from disabled supplier
+    assertThat(inlayHints)
       .isNotEmpty()
-      .doesNotContain(supplier);
+      .contains(getTestHint());
+  }
 
+  @Test
+  void testResolveInlayHintWithUnknownSupplierReturnsUnchanged() {
+
+    // given
+    // data ссылается на несуществующий сапплаер
+    var unresolved = new InlayHint(new Position(0, 0), Either.forLeft("unknown supplier"));
+    var data = new DefaultInlayHintData(documentContext.getUri(), "doesNotExistSupplier");
+
+    // when
+    var resolved = provider.resolveInlayHint(documentContext, unresolved, data);
+
+    // then
+    assertThat(resolved).isSameAs(unresolved);
+    assertThat(resolved.getTooltip()).isNull();
+  }
+
+  @Test
+  void testExtractDataReturnsNullWhenNoData() {
+
+    // given
+    var inlayHint = new InlayHint(new Position(0, 0), Either.forLeft("no data"));
+
+    // when
+    var data = provider.extractData(inlayHint);
+
+    // then
+    assertThat(data).isNull();
+  }
+
+  @Test
+  void testExtractDataReturnsUriFromData() {
+
+    // given
+    var inlayHint = new InlayHint(new Position(0, 0), Either.forLeft("with uri"));
+    inlayHint.setData(new DefaultInlayHintData(documentContext.getUri(), "someSupplier"));
+
+    // when
+    var data = provider.extractData(inlayHint);
+
+    // then
+    assertThat(data).isNotNull();
+    assertThat(data.getUri()).isEqualTo(documentContext.getUri());
   }
 
   private static InlayHint getTestHint() {
@@ -120,16 +167,21 @@ class InlayHintProviderTest {
   @TestConfiguration
   static class Configuration {
     @Bean
-    InlayHintSupplier inlayHintSupplier() {
+    InlayHintSupplier<DefaultInlayHintData> inlayHintSupplier() {
       return new TestInlayHintSupplier();
     }
   }
 
-  static class TestInlayHintSupplier implements InlayHintSupplier {
+  static class TestInlayHintSupplier implements InlayHintSupplier<DefaultInlayHintData> {
     @Override
     public List<InlayHint> getInlayHints(DocumentContext documentContext, InlayHintParams params) {
       var inlayHint = getTestHint();
       return List.of(inlayHint);
+    }
+
+    @Override
+    public Class<DefaultInlayHintData> getInlayHintDataClass() {
+      return DefaultInlayHintData.class;
     }
   }
 

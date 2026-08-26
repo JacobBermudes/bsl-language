@@ -99,7 +99,7 @@ class JUnitReporterTest {
     DiagnosticReporter reporter = new JUnitReporter();
 
     // when
-    reporter.report(analysisInfo, Path.of(sourceDir));
+    ReporterTestDriver.report(reporter, analysisInfo, Path.of(sourceDir));
 
     // then
     var mapper = new XmlMapper();
@@ -107,5 +107,10 @@ class JUnitReporterTest {
 
     assertThat(report).isNotNull();
 
+  }
+
+  @Test
+  void doesNotRequireMetricCalculation() {
+    assertThat(new JUnitReporter().isMetricCalculationRequired()).isFalse();
   }
 }

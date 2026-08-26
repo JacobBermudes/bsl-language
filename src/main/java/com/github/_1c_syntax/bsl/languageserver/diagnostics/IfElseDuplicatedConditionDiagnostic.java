@@ -25,7 +25,7 @@ import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticM
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticSeverity;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticTag;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticType;
-import com.github._1c_syntax.bsl.languageserver.utils.DiagnosticHelper;
+import com.github._1c_syntax.bsl.languageserver.utils.Trees;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import com.github._1c_syntax.bsl.languageserver.utils.RelatedInformation;
 import com.github._1c_syntax.bsl.parser.BSLParser;
@@ -40,6 +40,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
+ * Диагностика повторяющихся условий в синтаксической конструкции {@code Если…Тогда…ИначеЕсли…}.
+ *
  * @author Leon Chagelishvili &lt;lChagelishvily@gmail.com&gt;
  */
 @DiagnosticMetadata(
@@ -91,7 +93,7 @@ public class IfElseDuplicatedConditionDiagnostic extends AbstractVisitorDiagnost
       .skip(i)
       .filter(expressionContext ->
         !expressionContext.equals(currentExpression)
-          && DiagnosticHelper.equalNodes(currentExpression, expressionContext))
+          && Trees.equalNodes(currentExpression, expressionContext))
       .toList();
 
     if (identicalExpressions.isEmpty()) {

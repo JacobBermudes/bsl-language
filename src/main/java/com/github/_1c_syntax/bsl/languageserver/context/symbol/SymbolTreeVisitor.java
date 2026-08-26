@@ -43,11 +43,19 @@ public interface SymbolTreeVisitor {
   void visitRegion(RegionSymbol region);
 
   /**
-   * Посетить символ метода.
+   * Посетить обычный метод или функцию ({@link RegularMethodSymbol}).
    *
    * @param method Символ метода
    */
-  void visitMethod(MethodSymbol method);
+  void visitRegularMethod(RegularMethodSymbol method);
+
+  /**
+   * Посетить символ конструктора OneScript-класса
+   * ({@code ПриСозданииОбъекта} / {@code OnObjectCreate}).
+   *
+   * @param constructor Символ конструктора
+   */
+  void visitConstructor(ConstructorSymbol constructor);
 
   /**
    * Посетить символ переменной.
@@ -55,4 +63,11 @@ public interface SymbolTreeVisitor {
    * @param variable Символ переменной
    */
   void visitVariable(VariableSymbol variable);
+
+  /**
+   * Посетить символ метода-обработчика платформенного события.
+   *
+   * @param event Символ обработчика события
+   */
+  void visitEventMethod(EventMethodSymbol event);
 }

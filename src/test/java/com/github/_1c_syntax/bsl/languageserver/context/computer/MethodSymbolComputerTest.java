@@ -22,6 +22,7 @@
 package com.github._1c_syntax.bsl.languageserver.context.computer;
 
 import com.github._1c_syntax.bsl.languageserver.context.ServerContext;
+import com.github._1c_syntax.bsl.languageserver.context.ServerContextProvider;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.MethodSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.ParameterDefinition;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.annotations.AnnotationKind;
@@ -48,7 +49,7 @@ class MethodSymbolComputerTest {
   private static final String PATH_TO_CATALOG_MODULE_FILE = "Catalogs/Справочник1/Ext/ObjectModule.bsl";
 
   @Autowired
-  private ServerContext serverContext;
+  private ServerContextProvider serverContextProvider;
 
   @Test
   void testMethodSymbolComputer() {
@@ -274,7 +275,12 @@ class MethodSymbolComputerTest {
   void testOwner() {
 
     var path = Absolute.path(PATH_TO_METADATA);
+
+    // Create workspace for the path
+    serverContextProvider.clear();
+    var serverContext = serverContextProvider.addWorkspace(path.toUri());
     serverContext.setConfigurationRoot(path);
+
     checkModule(serverContext, PATH_TO_MODULE_FILE, 7);
     checkModule(serverContext, PATH_TO_CATALOG_FILE, 2);
     checkModule(serverContext, PATH_TO_CATALOG_MODULE_FILE, 1);
@@ -289,6 +295,151 @@ class MethodSymbolComputerTest {
     assertThat(methods.getFirst().getName()).isEqualTo("Выполнить");
     assertThat(methods.getFirst().getSubNameRange()).isEqualTo(Ranges.create(0, 10, 0, 19));
 
+  }
+
+  @Test
+  void testAsyncFunctionDescription() {
+    // given
+    var source = """
+      // Описание асинхронной функции.
+      //
+      // Параметры:
+      //   Желудь - Произвольный - первый параметр
+      //   ОпределениеЖелудя - Произвольный - второй параметр
+      //
+      // Возвращаемое значение:
+      //   Произвольный
+      Асинх Функция ОбработатьЖелудь(Желудь, ОпределениеЖелудя) Экспорт
+          Возврат Желудь;
+      КонецФункции
+      """;
+
+    // when
+    var documentContext = TestUtils.getDocumentContext(source);
+    var methods = documentContext.getSymbolTree().getMethods();
+
+    // then
+    assertThat(methods).hasSize(1);
+    var method = methods.getFirst();
+    assertThat(method.getName()).isEqualTo("ОбработатьЖелудь");
+    assertThat(method.isAsync()).isTrue();
+    assertThat(method.getDescription()).isPresent();
+    assertThat(method.getDescription().orElseThrow().getDescription())
+      .contains("Описание асинхронной функции");
+
+    var parameters = method.getParameters();
+    assertThat(parameters).hasSize(2);
+    assertThat(parameters.get(0).getName()).isEqualTo("Желудь");
+    assertThat(parameters.get(0).getDescription()).isPresent();
+    assertThat(parameters.get(1).getName()).isEqualTo("ОпределениеЖелудя");
+    assertThat(parameters.get(1).getDescription()).isPresent();
+  }
+
+  @Test
+  void testAsyncProcedureDescription() {
+    // given
+    var source = """
+      // Описание асинхронной процедуры.
+      //
+      // Параметры:
+      //   Парам1 - Произвольный - описание
+      Асинх Процедура ВыполнитьЧтоТо(Парам1) Экспорт
+      КонецПроцедуры
+      """;
+
+    // when
+    var documentContext = TestUtils.getDocumentContext(source);
+    var methods = documentContext.getSymbolTree().getMethods();
+
+    // then
+    assertThat(methods).hasSize(1);
+    var method = methods.getFirst();
+    assertThat(method.getName()).isEqualTo("ВыполнитьЧтоТо");
+    assertThat(method.isAsync()).isTrue();
+    assertThat(method.getDescription()).isPresent();
+    assertThat(method.getParameters()).hasSize(1);
+    assertThat(method.getParameters().getFirst().getDescription()).isPresent();
+  }
+
+  @Test
+  void testAsyncMethodWithAnnotation() {
+    // given
+    var source = """
+      // Описание async + аннотация.
+      //
+      // Параметры:
+      //   Парам1 - Произвольный - описание
+      &После
+      Асинх Процедура ОбработатьСобытие(Парам1) Экспорт
+      КонецПроцедуры
+      """;
+
+    // when
+    var documentContext = TestUtils.getDocumentContext(source);
+    var methods = documentContext.getSymbolTree().getMethods();
+
+    // then
+    assertThat(methods).hasSize(1);
+    var method = methods.getFirst();
+    assertThat(method.getName()).isEqualTo("ОбработатьСобытие");
+    assertThat(method.isAsync()).isTrue();
+    assertThat(method.getDescription()).isPresent();
+    assertThat(method.getParameters().getFirst().getDescription()).isPresent();
+    assertThat(method.getAnnotations()).hasSize(1);
+    assertThat(method.getAnnotations().getFirst().getKind()).isEqualTo(AnnotationKind.AFTER);
+    // у аннотации приоритет над Асинх: range начинается с AMPERSAND аннотации, а не с Асинх
+    assertThat(method.getRange()).isEqualTo(Ranges.create(4, 0, 6, 14));
+  }
+
+  @Test
+  void testAsyncMethodWithCompilerDirective() {
+    // given
+    var source = """
+      // Описание async + директива компиляции.
+      //
+      // Параметры:
+      //   Парам1 - Произвольный - описание
+      &НаКлиенте
+      Асинх Процедура ВыполнитьНаКлиенте(Парам1) Экспорт
+      КонецПроцедуры
+      """;
+
+    // when
+    var documentContext = TestUtils.getDocumentContext(source);
+    var methods = documentContext.getSymbolTree().getMethods();
+
+    // then
+    assertThat(methods).hasSize(1);
+    var method = methods.getFirst();
+    assertThat(method.getName()).isEqualTo("ВыполнитьНаКлиенте");
+    assertThat(method.isAsync()).isTrue();
+    assertThat(method.getDescription()).isPresent();
+    assertThat(method.getParameters().getFirst().getDescription()).isPresent();
+    assertThat(method.getCompilerDirectiveKind().orElse(null)).isEqualTo(CompilerDirectiveKind.AT_CLIENT);
+    // директивы компиляции исторически не входят в range; ASYNC задаёт начало range
+    assertThat(method.getRange()).isEqualTo(Ranges.create(5, 0, 6, 14));
+  }
+
+  @Test
+  void testNonAsyncMethodHasNoAsyncFlag() {
+    // given
+    var source = """
+      Процедура Обычная()
+      КонецПроцедуры
+
+      Функция ОбычнаяФункция()
+          Возврат 1;
+      КонецФункции
+      """;
+
+    // when
+    var documentContext = TestUtils.getDocumentContext(source);
+    var methods = documentContext.getSymbolTree().getMethods();
+
+    // then
+    assertThat(methods).hasSize(2);
+    assertThat(methods.get(0).isAsync()).isFalse();
+    assertThat(methods.get(1).isAsync()).isFalse();
   }
 
   private static void checkCompilerDirective_for_AtClient_AndAnnotation_After(MethodSymbol methodSymbol) {

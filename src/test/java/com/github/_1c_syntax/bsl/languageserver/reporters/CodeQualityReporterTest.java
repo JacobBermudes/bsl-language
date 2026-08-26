@@ -21,8 +21,10 @@
  */
 package com.github._1c_syntax.bsl.languageserver.reporters;
 
+import com.github._1c_syntax.bsl.languageserver.context.AbstractServerContextAwareTest;
 import com.github._1c_syntax.bsl.languageserver.reporters.data.AnalysisInfo;
 import com.github._1c_syntax.bsl.languageserver.reporters.data.FileInfo;
+import com.github._1c_syntax.bsl.languageserver.util.CleanupContextBeforeClassAndAfterEachTestMethod;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import org.apache.commons.io.FileUtils;
@@ -46,7 +48,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
-class CodeQualityReporterTest {
+@CleanupContextBeforeClassAndAfterEachTestMethod
+class CodeQualityReporterTest extends AbstractServerContextAwareTest {
+
+  private static final String SOURCE_DIR = ".";
 
   private final File file = new File("./bsl-code-quality.json");
 
@@ -55,6 +60,11 @@ class CodeQualityReporterTest {
 
   @BeforeEach
   void setUp() {
+    // Workspace нужен только для резолва workspace-scoped бинов: отчёт строится из
+    // AnalysisInfo, а не из содержимого контекста. Пустой каталог вместо корня проекта —
+    // регистрация корня индексировала бы OneScript-библиотеки всего репозитория
+    // (чтение и разбор каждого .os) на каждый тест-метод.
+    initServerContext();
     FileUtils.deleteQuietly(file);
   }
 
@@ -77,12 +87,11 @@ class CodeQualityReporterTest {
     );
 
     var documentContext = TestUtils.getDocumentContext("");
-    String sourceDir = ".";
-    FileInfo fileInfo = new FileInfo(sourceDir, documentContext, Collections.singletonList(diagnostic));
-    AnalysisInfo analysisInfo = new AnalysisInfo(LocalDateTime.now(), Collections.singletonList(fileInfo), sourceDir);
+    FileInfo fileInfo = new FileInfo(SOURCE_DIR, documentContext, Collections.singletonList(diagnostic));
+    AnalysisInfo analysisInfo = new AnalysisInfo(LocalDateTime.now(), Collections.singletonList(fileInfo), SOURCE_DIR);
 
     // when
-    reporter.report(analysisInfo, Path.of(sourceDir));
+    ReporterTestDriver.report(reporter, analysisInfo, Path.of("."));
 
     // then
     var mapper = new JsonMapper();
@@ -94,5 +103,10 @@ class CodeQualityReporterTest {
 
     assertThat(report).hasSize(1);
 
+  }
+
+  @Test
+  void doesNotRequireMetricCalculation() {
+    assertThat(reporter.isMetricCalculationRequired()).isFalse();
   }
 }

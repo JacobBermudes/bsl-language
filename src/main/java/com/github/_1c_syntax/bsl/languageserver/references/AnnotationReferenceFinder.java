@@ -23,7 +23,7 @@ package com.github._1c_syntax.bsl.languageserver.references;
 
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
 import com.github._1c_syntax.bsl.languageserver.context.FileType;
-import com.github._1c_syntax.bsl.languageserver.context.ServerContext;
+import com.github._1c_syntax.bsl.languageserver.context.ServerContextProvider;
 import com.github._1c_syntax.bsl.languageserver.context.events.DocumentContextContentChangedEvent;
 import com.github._1c_syntax.bsl.languageserver.context.events.ServerContextDocumentRemovedEvent;
 import com.github._1c_syntax.bsl.languageserver.context.events.ServerContextPopulatedEvent;
@@ -32,8 +32,8 @@ import com.github._1c_syntax.bsl.languageserver.context.symbol.AnnotationSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.MethodSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.annotations.Annotation;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.annotations.AnnotationParameterDefinition;
+import com.github._1c_syntax.bsl.languageserver.references.model.AnnotationRepository;
 import com.github._1c_syntax.bsl.languageserver.references.model.Reference;
-import com.github._1c_syntax.bsl.languageserver.utils.Methods;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import com.github._1c_syntax.bsl.languageserver.utils.Trees;
 import com.github._1c_syntax.bsl.parser.BSLParser;
@@ -44,12 +44,11 @@ import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
-import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Поиск ссылок на методы из аннотаций.
@@ -58,15 +57,17 @@ import java.util.concurrent.ConcurrentHashMap;
  * и находит ссылки на методы, указанные в них.
  */
 @Component
+@Order(180)
 @RequiredArgsConstructor
 public class AnnotationReferenceFinder implements ReferenceFinder {
 
-  private final ServerContext serverContext;
-  private final Map<String, AnnotationSymbol> registeredAnnotations = new ConcurrentHashMap<>();
+  private final ServerContextProvider serverContextProvider;
+  private final AnnotationRepository annotationRepository;
 
   @EventListener
   public void handleContextRefresh(ServerContextPopulatedEvent event) {
-    registeredAnnotations.clear();
+    var serverContext = event.getSource();
+    annotationRepository.clear();
     serverContext.getDocuments()
       .values()
       .forEach(this::findAndRegisterAnnotation);
@@ -75,17 +76,14 @@ public class AnnotationReferenceFinder implements ReferenceFinder {
   @EventListener
   public void handleDocumentContextChange(DocumentContextContentChangedEvent event) {
     DocumentContext documentContext = event.getSource();
-    var uri = documentContext.getUri();
 
-    removeAnnotationsRegisteredForUri(uri);
+    annotationRepository.removeByUri(documentContext.getUri());
     findAndRegisterAnnotation(documentContext);
   }
 
   @EventListener
   public void handleServerContextDocumentRemovedEvent(ServerContextDocumentRemovedEvent event) {
-    var uri = event.getUri();
-
-    removeAnnotationsRegisteredForUri(uri);
+    annotationRepository.removeByUri(event.getUri());
   }
 
   private void findAndRegisterAnnotation(DocumentContext documentContext) {
@@ -102,7 +100,7 @@ public class AnnotationReferenceFinder implements ReferenceFinder {
 
     var symbolTree = documentContext.getSymbolTree();
 
-    var methodSymbolAnnotationPair = Methods.getOscriptClassConstructor(symbolTree)
+    var methodSymbolAnnotationPair = symbolTree.getConstructor()
       .flatMap(AnnotationReferenceFinder::findAnnotation);
 
     methodSymbolAnnotationPair
@@ -110,18 +108,19 @@ public class AnnotationReferenceFinder implements ReferenceFinder {
       .flatMap(AnnotationReferenceFinder::getAnnotationName)
       .flatMap(annotationName -> methodSymbolAnnotationPair.map(Pair::getLeft)
         .map(methodSymbol -> AnnotationSymbol.from(annotationName, methodSymbol)))
-      .ifPresent(annotationSymbol ->
-        registeredAnnotations.put(annotationSymbol.getName(), annotationSymbol));
+      .ifPresent(annotationRepository::register);
   }
 
-  private void removeAnnotationsRegisteredForUri(URI uri) {
-    registeredAnnotations.values()
-      .removeIf(annotationSymbol -> annotationSymbol.getOwner().getUri().equals(uri));
+  private Optional<AnnotationSymbol> getAnnotationSymbol(BSLParser.AnnotationNameContext annotationNode) {
+    var annotationName = annotationNode.getText();
+    return annotationRepository.findByName(annotationName);
   }
+
 
   @Override
   public Optional<Reference> findReference(URI uri, Position position) {
-    DocumentContext documentContext = serverContext.getDocument(uri);
+    // Горячий путь — без захвата RWLock на ServerContext.
+    var documentContext = serverContextProvider.getDocumentNoLock(uri).orElse(null);
     if (documentContext == null || documentContext.getFileType() != FileType.OS) {
       return Optional.empty();
     }
@@ -192,11 +191,6 @@ public class AnnotationReferenceFinder implements ReferenceFinder {
       .map(BSLParser.AnnotationParamContext.class::cast)
       .flatMap(annotationParamContext ->
         getReferenceToAnnotationParam(documentContext, Optional.of(annotationParamContext)));
-  }
-
-  private Optional<AnnotationSymbol> getAnnotationSymbol(BSLParser.AnnotationNameContext annotationNode) {
-    var annotationName = annotationNode.getText();
-    return Optional.ofNullable(registeredAnnotations.get(annotationName));
   }
 
   private Optional<Reference> getReferenceToAnnotationParam(

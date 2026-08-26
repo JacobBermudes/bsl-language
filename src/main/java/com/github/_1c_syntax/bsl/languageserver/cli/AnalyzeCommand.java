@@ -21,19 +21,24 @@
  */
 package com.github._1c_syntax.bsl.languageserver.cli;
 
+import com.github._1c_syntax.bsl.languageserver.configuration.GlobalLanguageServerConfiguration;
 import com.github._1c_syntax.bsl.languageserver.configuration.LanguageServerConfiguration;
 import com.github._1c_syntax.bsl.languageserver.context.ServerContext;
+import com.github._1c_syntax.bsl.languageserver.context.ServerContextProvider;
+import com.github._1c_syntax.bsl.languageserver.infrastructure.WorkspaceContextHolder;
+import com.github._1c_syntax.bsl.languageserver.reporters.ReportContext;
+import com.github._1c_syntax.bsl.languageserver.reporters.ReportSession;
 import com.github._1c_syntax.bsl.languageserver.reporters.ReportersAggregator;
-import com.github._1c_syntax.bsl.languageserver.reporters.data.AnalysisInfo;
 import com.github._1c_syntax.bsl.languageserver.reporters.data.FileInfo;
+import com.github._1c_syntax.bsl.languageserver.utils.BSLFiles;
 import com.github._1c_syntax.utils.Absolute;
 import lombok.RequiredArgsConstructor;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import me.tongfei.progressbar.ProgressBar;
 import me.tongfei.progressbar.ProgressBarBuilder;
 import me.tongfei.progressbar.ProgressBarStyle;
-import org.apache.commons.io.FileUtils;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import picocli.CommandLine.Command;
 
@@ -43,7 +48,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 
 import static picocli.CommandLine.Option;
 
@@ -136,8 +142,13 @@ public class AnalyzeCommand implements Callable<Integer> {
   private boolean silentMode;
 
   private final ReportersAggregator aggregator;
+  private final GlobalLanguageServerConfiguration globalConfiguration;
+  private final ServerContextProvider serverContextProvider;
   private final LanguageServerConfiguration configuration;
-  private final ServerContext context;
+  @Qualifier("cliExecutor")
+  private final ExecutorService cliExecutor;
+
+  private ServerContext serverContext;
 
   public Integer call() {
 
@@ -154,59 +165,116 @@ public class AnalyzeCommand implements Callable<Integer> {
     }
 
     var configurationFile = new File(configurationOption);
-    configuration.update(configurationFile);
 
-    var configurationPath = LanguageServerConfiguration.getCustomConfigurationRoot(configuration, srcDir);
-    context.setConfigurationRoot(configurationPath);
+    // Update global configuration
+    globalConfiguration.update(configurationFile);
 
-    var files = (List<File>) FileUtils.listFiles(srcDir.toFile(), new String[]{"bsl", "os"}, true);
-
-    context.populateContext(files);
-
-    List<FileInfo> fileInfos;
-    if (silentMode) {
-      fileInfos = files.parallelStream()
-        .map((File file) -> getFileInfoFromFile(workspaceDir, file))
-        .collect(Collectors.toList());
-    } else {
-      try (ProgressBar pb = new ProgressBarBuilder()
-        .setTaskName("Analyzing files...")
-        .setInitialMax(files.size())
-        .setStyle(ProgressBarStyle.ASCII)
-        .build()) {
-        fileInfos = files.parallelStream()
-          .map((File file) -> {
-            pb.step();
-            return getFileInfoFromFile(workspaceDir, file);
-          })
-          .collect(Collectors.toList());
-      }
+    // -c влияет и на глобальную, и на per-workspace конфигурацию (в analyze всегда ровно один
+    // workspace). Обновляем workspace-scoped конфигурацию ДО addWorkspace, чтобы тот сам
+    // подхватил из неё configurationRoot (см. ServerContextProvider#addWorkspace) и типы
+    // конфигурации зарегистрировались уже на WorkspaceAddedEvent — без отдельного события.
+    // forUri с именем задаёт контекст для ещё не зарегистрированного workspace; addWorkspace
+    // зарегистрирует его позже и прочитает уже обновлённую конфигурацию (тот же инстанс LSC).
+    try (var ctx = WorkspaceContextHolder.forUri(srcDir.toUri(), srcDir.getFileName().toString())) {
+      configuration.update(configurationFile);
     }
 
-    var analysisInfo = new AnalysisInfo(LocalDateTime.now(), fileInfos, srcDir.toString());
-    var outputDir = Absolute.path(outputDirOption);
-    aggregator.report(analysisInfo, outputDir);
-    return 0;
+    // Create workspace for srcDir (factory will create per-workspace configuration)
+    serverContext = serverContextProvider.addWorkspace(srcDir.toUri());
+
+    try (var ctx = WorkspaceContextHolder.forUri(srcDir.toUri())) {
+      var files = new ArrayList<>(BSLFiles.listBslFiles(srcDir, configuration.getExcludePaths()));
+
+      serverContext.populateContext(files);
+
+      // Метрики вычисляются лениво и стоят дорого. Считаем их только если хотя бы одному
+      // активному репортеру они действительно нужны (см. ReportersAggregator).
+      var metricCalculationRequired = aggregator.isMetricCalculationRequired();
+
+      var context = new ReportContext(LocalDateTime.now(), srcDir.toString());
+      var outputDir = Absolute.path(outputDirOption);
+
+      // Результаты передаются репортёрам по одному сразу после разбора файла и больше нигде не
+      // удерживаются: пик памяти не зависит от размера конфигурации (см. issue #4412).
+      try (var session = aggregator.beginReport(context, outputDir)) {
+        analyze(files, workspaceDir, metricCalculationRequired, session);
+        session.commit();
+      }
+      return 0;
+    } catch (ExecutionException e) {
+      throw new IllegalStateException("Error analyzing files", e);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Interrupted while analyzing files", e);
+    }
   }
 
   public String[] getReportersOptions() {
     return reportersOptions.clone();
   }
 
-  @SneakyThrows
-  private FileInfo getFileInfoFromFile(Path srcDir, File file) {
-    var documentContext = context.addDocument(Absolute.uri(file));
-    context.rebuildDocument(documentContext);
+  private void analyze(
+    List<File> files,
+    Path workspaceDir,
+    boolean metricCalculationRequired,
+    ReportSession session
+  ) throws ExecutionException, InterruptedException {
+    if (silentMode) {
+      analyze(files, workspaceDir, metricCalculationRequired, session, null);
+      return;
+    }
+
+    try (var progressBar = new ProgressBarBuilder()
+      .setTaskName("Analyzing files...")
+      .setInitialMax(files.size())
+      .setStyle(ProgressBarStyle.ASCII)
+      .build()) {
+      analyze(files, workspaceDir, metricCalculationRequired, session, progressBar);
+    }
+  }
+
+  private void analyze(
+    List<File> files,
+    Path workspaceDir,
+    boolean metricCalculationRequired,
+    ReportSession session,
+    @Nullable ProgressBar progressBar
+  ) throws ExecutionException, InterruptedException {
+    cliExecutor.submit(() ->
+      files.parallelStream()
+        .map((File file) -> {
+          if (progressBar != null) {
+            progressBar.step();
+          }
+          return getFileInfoFromFile(workspaceDir, file, metricCalculationRequired);
+        })
+        .forEach(session::accept)
+    ).get();
+  }
+
+  private FileInfo getFileInfoFromFile(Path srcDir, File file, boolean metricCalculationRequired) {
+    var documentContext = serverContext.addDocument(Absolute.uri(file));
+    serverContext.rebuildDocument(documentContext);
 
     var filePath = srcDir.relativize(Absolute.path(file));
     var diagnostics = documentContext.getDiagnostics();
-    var metrics = documentContext.getMetrics();
+    var metrics = metricCalculationRequired ? documentContext.getMetrics() : null;
     var mdoRef = documentContext.getMdoRef();
 
     var fileInfo = new FileInfo(filePath, mdoRef, diagnostics, metrics);
 
     // clean up AST after diagnostic computing to free up RAM.
-    context.tryClearDocument(documentContext);
+    // Документ заморожен в populateContext: между populate и вычислением диагностик файл не
+    // меняется, поэтому заморозка бережёт уже построенные ленивые данные от очистки/пересчёта
+    // (флаг влияет только на очистку). Здесь все нужные чтения (getDiagnostics, getMdoRef и,
+    // при необходимости, getMetrics) уже выполнены и захвачены в FileInfo, документ дальше не
+    // используется — размораживаем
+    // ПЕРЕД финальной очисткой, чтобы tryClearDocument освободил вторичные данные
+    // (сложность/метрики/подавления), а не держал их на всю конфигурацию (см. issue #4248).
+    // Саму заморозку это не отменяет: разморозка только на финальном clear, оптимизация
+    // populate -> diagnostics не затрагивается.
+    documentContext.unfreezeComputedData();
+    serverContext.tryClearDocument(documentContext);
 
     return fileInfo;
   }

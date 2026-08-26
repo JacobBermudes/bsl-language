@@ -21,38 +21,58 @@
  */
 package com.github._1c_syntax.bsl.languageserver.context;
 
+import com.github._1c_syntax.bsl.languageserver.configuration.Language;
 import com.github._1c_syntax.bsl.languageserver.util.CleanupContextBeforeClassAndAfterEachTestMethod;
 import com.github._1c_syntax.bsl.types.ConfigurationSource;
 import com.github._1c_syntax.bsl.types.ModuleType;
 import com.github._1c_syntax.bsl.types.ScriptVariant;
 import com.github._1c_syntax.utils.Absolute;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
 import java.io.File;
+import java.net.URI;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
 @CleanupContextBeforeClassAndAfterEachTestMethod
-class ServerContextTest {
+class ServerContextTest extends AbstractServerContextAwareTest {
 
   private static final String PATH_TO_METADATA = "src/test/resources/metadata/designer";
   private static final String PATH_TO_MODULE_FILE = "CommonModules/ПервыйОбщийМодуль/Ext/Module.bsl";
   private static final String PATH_TO_CATALOG_FILE = "Catalogs/Справочник1/Ext/ManagerModule.bsl";
   private static final String PATH_TO_CATALOG_MODULE_FILE = "Catalogs/Справочник1/Ext/ObjectModule.bsl";
 
-  @Autowired
-  private ServerContext serverContext;
+  @Test
+  void scriptVariantLanguageFollowsTheConfiguration() {
+    initServerContext(PATH_TO_METADATA);
+
+    assertThat(context.getConfiguration().getScriptVariant()).isEqualTo(ScriptVariant.RUSSIAN);
+    assertThat(context.getScriptVariantLanguage())
+      .as("язык исходников проекта — из ScriptVariant конфигурации, а не из настроек LS")
+      .isEqualTo(Language.RU);
+  }
+
+  @Test
+  void withoutConfigurationScriptVariantLanguageFallsBackToTheServerLanguage() {
+    // Проект без mdclasses-конфы: ScriptVariant взять неоткуда, остаётся язык сервера.
+    initServerContext();
+    var serverLanguage = context.getLanguageServerConfiguration().getLanguage();
+
+    assertThat(context.getConfiguration().getConfigurationSource()).isEqualTo(ConfigurationSource.EMPTY);
+    assertThat(context.getScriptVariantLanguage()).isEqualTo(serverLanguage);
+  }
 
   @Test
   void testConfigurationMetadata() {
-    Path path = Absolute.path(PATH_TO_METADATA);
-    serverContext.setConfigurationRoot(path);
-    var configurationMetadata = serverContext.getConfiguration();
+    // given
+    initServerContext(PATH_TO_METADATA);
 
+    // when
+    var configurationMetadata = context.getConfiguration();
+
+    // then
     assertThat(configurationMetadata).isNotNull();
 
     assertThat(configurationMetadata.getScriptVariant()).isEqualTo(ScriptVariant.RUSSIAN);
@@ -69,42 +89,53 @@ class ServerContextTest {
 
   @Test
   void testMdoRefs() {
-    var path = Absolute.path(PATH_TO_METADATA);
-    serverContext.setConfigurationRoot(path);
+    // given
+    initServerContext(PATH_TO_METADATA);
     var mdoRefCommonModule = "CommonModule.ПервыйОбщийМодуль";
 
-    var documentContext = addDocumentContext(serverContext, PATH_TO_MODULE_FILE);
-    assertThat(serverContext.getDocument(mdoRefCommonModule, documentContext.getModuleType()))
+    var documentContext = addDocumentContext(context, PATH_TO_MODULE_FILE);
+
+    // then
+    assertThat(context.getDocument(mdoRefCommonModule, documentContext.getModuleType()))
       .isPresent()
       .get()
       .isEqualTo(documentContext);
-    assertThat(serverContext.getDocuments(mdoRefCommonModule))
+    assertThat(context.getDocuments(mdoRefCommonModule))
       .hasSize(1)
       .containsKey(documentContext.getModuleType())
       .containsValue(documentContext);
 
-    addDocumentContext(serverContext, PATH_TO_CATALOG_MODULE_FILE);
-    addDocumentContext(serverContext, PATH_TO_CATALOG_FILE);
+    // given — документы справочника; повтор добавления того же файла для проверки на дубль
+    addDocumentContext(context, PATH_TO_CATALOG_MODULE_FILE);
+    addDocumentContext(context, PATH_TO_CATALOG_FILE);
 
     // для проверки на дубль
-    addDocumentContext(serverContext, PATH_TO_CATALOG_FILE);
+    addDocumentContext(context, PATH_TO_CATALOG_FILE);
 
-    assertThat(serverContext.getDocuments("Catalog.Справочник1"))
+    // then
+    assertThat(context.getDocuments("Catalog.Справочник1"))
       .hasSize(2)
       .containsKeys(ModuleType.ManagerModule, ModuleType.ObjectModule);
 
-    serverContext.removeDocument(Absolute.uri(new File(PATH_TO_METADATA, PATH_TO_MODULE_FILE)));
-    assertThat(serverContext.getDocument(mdoRefCommonModule, ModuleType.CommonModule))
+    // when
+    context.removeDocument(Absolute.uri(new File(PATH_TO_METADATA, PATH_TO_MODULE_FILE)));
+
+    // then
+    assertThat(context.getDocument(mdoRefCommonModule, ModuleType.CommonModule))
       .isNotPresent();
   }
 
   @Test
   void testErrorConfigurationMetadata() {
+    // given
     Path path = Absolute.path(PATH_TO_METADATA + "test");
 
-    serverContext.setConfigurationRoot(path);
-    var configurationMetadata = serverContext.getConfiguration();
+    initServerContext(path);
 
+    // when
+    var configurationMetadata = context.getConfiguration();
+
+    // then
     assertThat(configurationMetadata).isNotNull();
     assertThat(configurationMetadata.getModulesByType()).isEmpty();
   }
@@ -112,16 +143,35 @@ class ServerContextTest {
   @Test
   void testPopulateContext() {
     // given
-    Path path = Absolute.path(PATH_TO_METADATA);
-    serverContext.setConfigurationRoot(path);
-
-    assertThat(serverContext.getDocuments()).isEmpty();
+    initServerContext(PATH_TO_METADATA, false);
+    assertThat(context.getDocuments()).isEmpty();
 
     // when
-    serverContext.populateContext();
+    context.populateContext();
 
     // then
-    assertThat(serverContext.getDocuments()).hasSizeGreaterThan(0);
+    assertThat(context.getDocuments()).hasSizeGreaterThan(0);
+  }
+
+  /** Каталоги, перечисленные в {@code excludePaths} конфигурации, не попадают в начальный контекст. */
+  @Test
+  void testPopulateContextExcludesPathsFromConfig() {
+    // given
+    Path path = Absolute.path(PATH_TO_METADATA);
+    initServerContext(path, false);
+    context.getLanguageServerConfiguration().setExcludePaths(List.of("CommonModules"));
+
+    // when
+    context.populateContext();
+
+    // then
+    var documents = context.getDocuments();
+    assertThat(documents).isNotEmpty();
+    var commonModuleUris = documents.keySet().stream()
+      .map(URI::getPath)
+      .filter(p -> p.contains("CommonModules"))
+      .toList();
+    assertThat(commonModuleUris).isEmpty();
   }
 
   private DocumentContext addDocumentContext(ServerContext serverContext, String path) {

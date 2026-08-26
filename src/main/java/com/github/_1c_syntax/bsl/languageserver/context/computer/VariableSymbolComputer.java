@@ -24,8 +24,11 @@ package com.github._1c_syntax.bsl.languageserver.context.computer;
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.MethodSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.ModuleSymbol;
+import com.github._1c_syntax.bsl.languageserver.context.symbol.SelfMemberClassifier;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.SourceDefinedSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.VariableSymbol;
+import com.github._1c_syntax.bsl.languageserver.context.symbol.annotations.Annotation;
+import com.github._1c_syntax.bsl.languageserver.context.symbol.annotations.Annotations;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.variable.VariableKind;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import com.github._1c_syntax.bsl.languageserver.utils.Trees;
@@ -34,6 +37,7 @@ import com.github._1c_syntax.bsl.parser.BSLParserBaseVisitor;
 import com.github._1c_syntax.bsl.parser.description.VariableDescription;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.tree.ErrorNode;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
 import org.eclipse.lsp4j.Range;
@@ -62,16 +66,20 @@ public class VariableSymbolComputer extends BSLParserBaseVisitor<ParseTree> impl
   private final DocumentContext documentContext;
   private final ModuleSymbol module;
   private final Map<Range, SourceDefinedSymbol> methods;
+  private final SelfMemberClassifier selfMemberClassifier;
   private final Set<VariableSymbol> variables = new HashSet<>();
   private final Map<String, String> currentMethodVariables = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
   private final Map<String, String> moduleVariables = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
 
   private SourceDefinedSymbol currentMethod;
 
-  public VariableSymbolComputer(DocumentContext documentContext, ModuleSymbol module,  List<MethodSymbol> methods) {
+  public VariableSymbolComputer(DocumentContext documentContext, ModuleSymbol module,
+                                List<? extends MethodSymbol> methods,
+                                SelfMemberClassifier selfMemberClassifier) {
     this.documentContext = documentContext;
     this.module = module;
     this.methods = methods.stream().collect(toMap(MethodSymbol::getSubNameRange, Function.identity()));
+    this.selfMemberClassifier = selfMemberClassifier;
     this.currentMethod = module;
   }
 
@@ -85,7 +93,7 @@ public class VariableSymbolComputer extends BSLParserBaseVisitor<ParseTree> impl
 
   @Override
   public ParseTree visitModuleVarDeclaration(BSLParser.ModuleVarDeclarationContext ctx) {
-    if (moduleVariables.containsKey(ctx.var_name().getText())) {
+    if (hasMissingName(ctx.var_name()) || moduleVariables.containsKey(ctx.var_name().getText())) {
       return ctx;
     }
 
@@ -97,6 +105,7 @@ public class VariableSymbolComputer extends BSLParserBaseVisitor<ParseTree> impl
       .export(ctx.EXPORT_KEYWORD() != null)
       .kind(VariableKind.MODULE)
       .description(createDescription(ctx))
+      .annotations(moduleVarAnnotations(ctx))
       .scope(module)
       .build();
     variables.add(symbol);
@@ -115,6 +124,10 @@ public class VariableSymbolComputer extends BSLParserBaseVisitor<ParseTree> impl
 
   @Override
   public ParseTree visitSubVarDeclaration(BSLParser.SubVarDeclarationContext ctx) {
+    if (hasMissingName(ctx.var_name())) {
+      return ctx;
+    }
+
     var symbol = VariableSymbol.builder()
       .name(ctx.var_name().getText())
       .owner(documentContext)
@@ -150,6 +163,7 @@ public class VariableSymbolComputer extends BSLParserBaseVisitor<ParseTree> impl
       .export(false)
       .kind(VariableKind.PARAMETER)
       .description(Optional.empty())
+      .annotations(Annotations.from(ctx.annotation()))
       .build();
     variables.add(variable);
 
@@ -168,6 +182,13 @@ public class VariableSymbolComputer extends BSLParserBaseVisitor<ParseTree> impl
       || ctx.IDENTIFIER() == null
       || currentMethodVariables.containsKey(ctx.getText())
       || moduleVariables.containsKey(ctx.getText())
+      // Голое присваивание одноимённому self-реквизиту (без Перем) — это обращение к
+      // реквизиту объекта/набора записей/менеджера, а не отдельная переменная: символ не
+      // заводим. Имя резолвит self-член machinery (инференсер, PlatformMemberReferenceFinder,
+      // индексация в ReferenceIndexFiller, подсветка SymbolsSemanticTokensSupplier). Проверка
+      // здесь, а не в общем updateVariablesCache: переменные цикла Для/Для Каждого — реальные
+      // объявления и НЕ должны подавляться, даже если их имя совпадает с реквизитом.
+      || selfMemberClassifier.isBareSelfProperty(documentContext, ctx.IDENTIFIER().getText())
     ) {
       return ctx;
     }
@@ -204,6 +225,43 @@ public class VariableSymbolComputer extends BSLParserBaseVisitor<ParseTree> impl
 
     updateVariablesCache(ctx.IDENTIFIER(), createDescription(ctx));
     return super.visitForEachStatement(ctx);
+  }
+
+  /**
+   * Аннотации объявления переменной модуля. Грамматически они висят на
+   * охватывающем {@code moduleVar} (общем для всех переменных в одном
+   * {@code Перем А, Б;}), поэтому поднимаемся к нему от объявления.
+   */
+  private static List<Annotation> moduleVarAnnotations(BSLParser.ModuleVarDeclarationContext ctx) {
+    var moduleVar = (BSLParser.ModuleVarContext) Trees.getRootParent(ctx, BSLParser.RULE_moduleVar);
+    if (moduleVar == null) {
+      return Collections.emptyList();
+    }
+    return Annotations.from(moduleVar.annotation());
+  }
+
+  /**
+   * Проверяет, что имя переменной отсутствует в исходном коде.
+   * <p>
+   * При незавершённом объявлении (например, {@code Перем} без имени) парсер
+   * выполняет восстановление и подставляет на место идентификатора фиктивный
+   * токен ({@link ErrorNode}). Такой токен получает позицию следующей значимой
+   * лексемы, из-за чего диапазон объявления становится «вывернутым» (начало
+   * после конца), а {@code selectionRange} перестаёт содержаться в {@code range}.
+   * Подобный символ ломает весь ответ на запрос {@code textDocument/documentSymbol},
+   * поэтому его нужно пропустить.
+   * <p>
+   * {@link Trees#nodeContainsErrors} здесь не подходит: он проверяет только
+   * {@link org.antlr.v4.runtime.ParserRuleContext#exception}, но не подставленные
+   * при восстановлении узлы-ошибки (см.
+   * <a href="https://github.com/1c-syntax/bsl-language-server/issues/3968">#3968</a>).
+   *
+   * @param varName Контекст имени переменной
+   * @return {@code true}, если идентификатор имени отсутствует или является узлом-ошибкой
+   */
+  private static boolean hasMissingName(BSLParser.Var_nameContext varName) {
+    var identifier = varName.IDENTIFIER();
+    return identifier == null || identifier instanceof ErrorNode;
   }
 
   private SourceDefinedSymbol getVariableScope(BSLParser.SubVarDeclarationContext ctx) {

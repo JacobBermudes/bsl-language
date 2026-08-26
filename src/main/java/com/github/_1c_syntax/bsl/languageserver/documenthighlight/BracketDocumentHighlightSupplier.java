@@ -26,7 +26,9 @@ import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import org.antlr.v4.runtime.Token;
 import org.eclipse.lsp4j.DocumentHighlight;
+import org.eclipse.lsp4j.DocumentHighlightKind;
 import org.eclipse.lsp4j.DocumentHighlightParams;
+import org.jspecify.annotations.Nullable;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
@@ -100,18 +102,18 @@ public class BracketDocumentHighlightSupplier implements DocumentHighlightSuppli
     }
 
     // Добавляем текущую скобку
-    highlights.add(new DocumentHighlight(Ranges.create(token)));
+    highlights.add(new DocumentHighlight(Ranges.create(token), DocumentHighlightKind.Text));
 
     // Ищем парную скобку
     var matchingToken = findMatchingBracket(token, allTokens, openType, closeType, isOpening);
     if (matchingToken != null) {
-      highlights.add(new DocumentHighlight(Ranges.create(matchingToken)));
+      highlights.add(new DocumentHighlight(Ranges.create(matchingToken), DocumentHighlightKind.Text));
     }
 
     return highlights;
   }
 
-  private Token findMatchingBracket(Token token, List<Token> allTokens, int openType, int closeType, boolean isOpening) {
+  private @Nullable Token findMatchingBracket(Token token, List<Token> allTokens, int openType, int closeType, boolean isOpening) {
     int tokenIndex = token.getTokenIndex();
     int depth = 1;
 

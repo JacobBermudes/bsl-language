@@ -3,6 +3,12 @@ on:
   pull_request_target:
     types: [opened, synchronize]
 
+# Воркфлоу срабатывает только на события PR, поэтому группа всегда общая для одного PR:
+# новый коммит отменяет предыдущий запуск, актуальный запуск делает ту же работу заново.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
@@ -14,7 +20,7 @@ jobs:
     steps:
       - name: Dependabot metadata
         id: metadata
-        uses: dependabot/fetch-metadata@ffa630c65fa7e0ecfa0625b5ceda64399aea1b36
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
       - name: Approve a PR

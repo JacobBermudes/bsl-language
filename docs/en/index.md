@@ -20,6 +20,7 @@
 * <a href="#websocket">Run in websocket mode</a>
 * <a href="#analyze">Run in analyzer mode</a>
 * <a href="#format">Run in formatter mode</a>
+* [Run in MCP mode](features/McpMode.md)
 * <a href="#configuration">Configuration file</a>
 * <a href="reporters">Reporters</a>
 * <a href="diagnostics">Diagnostics</a>
@@ -34,32 +35,49 @@ Perfomance measurement - [SSL 3.1](../bench/index.html)
 
 ## Features
 
-* File formatting
-* Selected region formatting
-* Symbol definition for current file (regions, procedures, functions, variables, defined via `Var` keyword)
-* Folding regions definition `#Region`, `#If`, procedures and functions, code blocks, queries
-* Methods "Cognitive Complexity" and "Cyclomatic Complexity" scores
-* Tooltip on local methods and methods of common / manager modules
-* Highlighting of matching constructs (if/elsif/else/endif, try/except/endtry, loops, regions, brackets)
-* Go to method definitions
-* Finding places to use methods
-* Method call hierarchy
-* Expand selection
-* Display color representation and convert between `Color` and `WebColors`
-* Diagnostics
-* Quick fixes and code actions for several diagnostics
+Each language-server capability comes with a short animated demo (see the [full catalog](capabilities/index.md)):
+
+* [Code completion](capabilities/completion.md) — Context-aware suggestions as you type: global functions, object methods and properties (with type inference), types after the `New` operator, keywords and local variables.
+* [Go to definition](capabilities/definition.md) — Jump from a usage to the declaration of a procedure, function, variable or method. Works within a module and across configuration modules.
+* [Go to implementations](capabilities/implementation.md) — For OneScript classes using the `extends` inheritance library: jump from an interface method (`&Интерфейс`) to the same-named methods in every implementing class (`&Реализует`).
+* [Find references](capabilities/references.md) — Find all usages of a symbol across the project.
+* [Quick documentation (hover)](capabilities/hover.md) — Hovering over a symbol shows its signature, type and the description from doc comments.
+* [Signature help](capabilities/signatureHelp.md) — While typing a method call, shows the parameter list and highlights the active parameter.
+* [Diagnostics](capabilities/diagnostics.md) — Highlights errors, potential issues and coding-standard violations inline and in the Problems panel.
+* [Code actions / Quick fixes](capabilities/codeAction.md) — Offers automatic fixes for diagnostics and refactorings via a shortcut at the problem location.
+* [Formatting](capabilities/formatting.md) — Format the whole document, a selection, or on-the-fly while typing (indentation, keyword casing).
+* [Rename](capabilities/rename.md) — Safely rename a symbol together with all its usages.
+* [Linked editing](capabilities/linkedEditing.md) — Editing the declaration of a local symbol (variable, parameter) updates all of its occurrences in the module at once — without invoking rename.
+* [Document symbols / Outline](capabilities/documentSymbol.md) — A tree of the module's procedures, functions and regions — in the Outline view and quick navigation.
+* [Workspace symbols](capabilities/workspaceSymbol.md) — Quickly jump to any method or object across the whole project by name.
+* [Document highlight](capabilities/documentHighlight.md) — Placing the cursor on a symbol highlights all its occurrences in the current module.
+* [Call hierarchy](capabilities/callHierarchy.md) — Who calls a method and what it calls — as an expandable tree.
+* [Type hierarchy](capabilities/typeHierarchy.md) — For OneScript classes using the `extends` inheritance library: a tree of supertypes and subtypes derived from the `&Расширяет` and `&Реализует` annotations.
+* [Code folding](capabilities/folding.md) — Collapse procedures, functions, regions and blocks for easier navigation.
+* [Smart selection](capabilities/selectionRange.md) — Expand and shrink the selection step by step along syntactic boundaries.
+* [Semantic highlighting](capabilities/semanticTokens.md) — Accurate highlighting based on code analysis: distinguishes variables, parameters, methods and annotations.
+* [Inlay hints](capabilities/inlayHint.md) — Inline hints embedded in the code — for example, parameter names at call sites.
+* [Code lens](capabilities/codeLens.md) — Informational lines above procedures: cognitive and cyclomatic complexity, test run and coverage.
+* [Colors: preview and picker](capabilities/color.md) — Color preview for `Новый Цвет(...)` and `WebЦвета.*`. Clicking the swatch opens the picker — choosing a color updates the code. Web colors convert to/from the RGB constructor representation.
+* [Document links (hyperlinks)](capabilities/documentLink.md) — Clickable links right in the module text: `См.`/`See` references in doc comments jump to the mentioned method or object; URLs in comments open in the browser; and optionally (**off by default**, `documentLink.showDiagnosticDescription`) the diagnosed range itself becomes a link to the diagnostic's documentation.
+
+Additional capabilities (outside the demo catalog — command line and workspaces):
+
 * Run diagnostics engine from command line
 * Run formatter engine from command line
-* Renaming Symbols
+* Multi-workspace support
 
 ## Supported protocol operations
 
 ??? workspace
     | Operation   | Support  | Comment  |
     | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-    | [didChangeWorkspaceFolders](https://microsoft.github.io/language-server-protocol/specification-current#workspace_didChangeWorkspaceFolders) |  <img src="./assets/images/cross.svg" alt="no" width="20">   |                                                              |
+    | [didChangeWorkspaceFolders](https://microsoft.github.io/language-server-protocol/specification-current#workspace_didChangeWorkspaceFolders) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | Dynamic add/remove of workspace folders                      |
     | [didChangeConfiguration](https://microsoft.github.io/language-server-protocol/specification#workspace_didChangeConfiguration) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | with restrictions see [#1431](https://github.com/1c-syntax/bsl-language-server/issues/1431) |
     | [didChangeWatchedFiles](https://microsoft.github.io/language-server-protocol/specification#workspace_didChangeWatchedFiles) |  <img src="./assets/images/checkmark.svg" alt="yes" width="20">   |                                                              |
+    | [didCreateFiles](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#workspace_didCreateFiles) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | Filters: `**/*.bsl`, `**/*.os`, folders |
+    | [didRenameFiles](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#workspace_didRenameFiles) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | Filters: `**/*.bsl`, `**/*.os`, folders |
+    | [didDeleteFiles](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#workspace_didDeleteFiles) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | Filters: `**/*.bsl`, `**/*.os`, folders |
     | [symbol](https://microsoft.github.io/language-server-protocol/specification#workspace_symbol) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> |                                                              |
     | [executeCommand](https://microsoft.github.io/language-server-protocol/specification#workspace_executeCommand) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> |                                                              |
     | [diagnostic/refresh](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_diagnostic_refresh) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | sent on configuration change |
@@ -81,21 +99,21 @@ Perfomance measurement - [SSL 3.1](../bench/index.html)
     | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ | ---------------- |
     | [publishDiagnostics](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_publishDiagnostics) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | tagSupport = true<br />versionSupport = true<br />[diagnostics](./diagnostics/index.md) | yes               |
     | [diagnostic](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_diagnostic) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | interFileDependencies = true<br />workspaceDiagnostics = false | no               |
-    | [completion](https://github.com/1c-syntax/bsl-language-server/blob/develop/docs/diagnostics/index.md) | <img src="./assets/images/cross.svg" alt="no" width="20">    | resolveProvider = false                                      |                  |
-    | [completionItem/resolve](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#completionItem_resolve) | <img src="./assets/images/cross.svg" alt="no" width="20">    |                                                              |                  |
+    | [completion](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_completion) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | resolveProvider = true<br />triggerCharacters = `.`<br />completionItem.labelDetailsSupport = true<br />Offers methods, functions and constructors with signatures, type members after a dot, local variables and keywords |                  |
+    | [completionItem/resolve](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#completionItem_resolve) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | Lazy documentation resolution (member/function description) when supported by the client |                  |
     | [hover](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_hover) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | contentFormat = MarkupContent                                |                  |
-    | [signatureHelp](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_signatureHelp) | <img src="./assets/images/cross.svg" alt="no" width="20">    |                                                              |                  |
+    | [signatureHelp](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_signatureHelp) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | triggerCharacters = `(`, `,`<br />retriggerCharacters = `,` |                  |
     | [declaration](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_declaration) | <img src="./assets/images/cross.svg" alt="no" width="20">    | not applicable in 1C:Enterprise                                |                  |
     | [definition](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_definition) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | linkSupport = true                                           |                  |
     | [typeDefinition](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_typeDefinition) | <img src="./assets/images/cross.svg" alt="no" width="20">    |                                                              |                  |
-    | [implementation](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_implementation) | <img src="./assets/images/cross.svg" alt="no" width="20">    | not applicable in 1C:Enterprise                                |                  |
+    | [implementation](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_implementation) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    | only for OneScript interfaces of the extends library (&Реализует) |                  |
     | [references](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_references) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> |                                                              |                  |
     | [documentHighlight](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_documentHighlight) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | Highlight related constructs: if/elsif/else/endif, try/except/endtry, loops, regions, brackets |                  |
     | [documentSymbol](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_documentSymbol) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | hierarchicalDocumentSymbolSupport = true                     |                  |
     | [codeAction](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_codeAction) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | codeActionKinds = ? (см. [#1433](https://github.com/1c-syntax/bsl-language-server/issues/1433))<br />isPreferredSupport = true | yes               |
     | [codeAction/resolve](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#codeAction_resolve) | <img src="./assets/images/cross.svg" alt="no" width="20">    |                                                              |                  |
-    | [codeLens](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_codeLens) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | resolveProvider = false                                      | yes               |
-    | [codeLens/resolve](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#codeLens_resolve) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    |                                                              |                  |
+    | [codeLens](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_codeLens) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | resolveProvider = true<br />If the client does not advertise resolveSupport with the `command` property, lens commands are resolved eagerly | yes               |
+    | [codeLens/resolve](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#codeLens_resolve) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    | Lazy resolution of lens commands when the client advertises resolveSupport with the `command` property |                  |
     | [codeLens/refresh](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#codeLens_refresh) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    |                                                              |                  |
     | [documentLink](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_documentLink) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | Showing hyperlinks to documentation on diagnostics.<br />tooltipSupport = true<br />resolveProvider = false | yes               |
     | [documentLink/resolve](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#documentLink_resolve) | <img src="./assets/images/cross.svg" alt="no" width="20">    |                                                              |                  |
@@ -103,7 +121,7 @@ Perfomance measurement - [SSL 3.1](../bench/index.html)
     | [colorPresentation](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_colorPresentation) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    |                                                              |                  |
     | [formatting](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_formatting) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> |                                                              |                  |
     | [rangeFormatting](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_rangeFormatting) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> |                                                              |                  |
-    | [onTypeFormatting](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_onTypeFormatting) | <img src="./assets/images/cross.svg" alt="no" width="20">    |                                                              |                  |
+    | [onTypeFormatting](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_onTypeFormatting) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | firstTriggerCharacter = `\n`<br />moreTriggerCharacter = `;` |                  |
     | [rename](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_rename) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    |                                                              |                  |
     | [prepareRename](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_prepareRename) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    |                                                              |                  |
     | [foldingRange](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_foldingRange) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> |                                                              |                  |
@@ -111,13 +129,16 @@ Perfomance measurement - [SSL 3.1](../bench/index.html)
     | [prepareCallHierarchy](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_prepareCallHierarchy) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> |                                                              |                  |
     | [callHierarchy/incomingCalls](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#callHierarchy_incomingCalls) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> |                                                              |                  |
     | [callHierarchy/outgoingCalls](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#callHierarchy_outgoingCalls) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> |                                                              |                  |
+    | [prepareTypeHierarchy](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_prepareTypeHierarchy) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | only for OneScript classes using the extends library         |                  |
+    | [typeHierarchy/supertypes](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#typeHierarchy_supertypes) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | only for OneScript classes using the extends library         |                  |
+    | [typeHierarchy/subtypes](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#typeHierarchy_subtypes) | <img src="./assets/images/checkmark.svg" alt="yes" width="20"> | only for OneScript classes using the extends library         |                  |
     | [semanticTokens/full](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_semanticTokens) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    | multilineTokenSupport = true                                                             |                  |
     | [semanticTokens/full/delta](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_semanticTokens) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    |                                                              |                  |
     | [semanticTokens/range](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_semanticTokens) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    |                                                              |                  |
-    | [linkedEditingRange](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_linkedEditingRange) | <img src="./assets/images/cross.svg" alt="no" width="20">    |                                                              |                  |
+    | [linkedEditingRange](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_linkedEditingRange) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    |                                                              |                  |
     | [moniker](https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_moniker) | <img src="./assets/images/cross.svg" alt="no" width="20">    |                                                              |                  |
-    | [inlayHint](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_inlayHint) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    | resolveProvider = false | yes |
-    | [inlayHint/resolve](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#inlayHint_resolve) | <img src="./assets/images/cross.svg" alt="no" width="20">    |                                                              |                  |
+    | [inlayHint](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_inlayHint) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    | resolveProvider = true | yes |
+    | [inlayHint/resolve](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#inlayHint_resolve) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    |                                                              |                  |
     | [inlayHint/refresh](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_inlayHint_refresh) | <img src="./assets/images/checkmark.svg" alt="yes" width="20">    |                                                              |                  |
 
 <a id="cli"></a>
@@ -143,6 +164,8 @@ Commands:
 ```
 
 Starting BSL Language Server in standard mode will run the Language Server communicating via [LSP]([language server protocol](https://microsoft.github.io/language-server-protocol/)). stdin and stdout are used for communication.
+
+The `-c` (`--configuration`) flag specifies the path to a configuration file. If not provided, BSL Language Server automatically searches for `.bsl-language-server.json` first in the current working directory, then in the user's home directory. See [Configuration file](features/ConfigurationFile.md) for details.
 
 By default diagnostics texts are displayed in Russian. To switch the diagnostics text language you need to set parameter `language` in configuration file or raise an event `workspace/didChangeConfiguration`:
 

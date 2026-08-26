@@ -6,6 +6,12 @@ on:
       - "translations_*"
   pull_request:
 
+# Для pull_request группа общая для всех запусков одного PR - новый коммит отменяет предыдущие запуски.
+# Для push (анализ ветки, например develop) в группу попадает уникальный run_id, поэтому запуски не отменяются.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   gatekeeper:
     runs-on: ubuntu-latest
@@ -18,7 +24,7 @@ jobs:
     outputs:
       has_pr: ${{ steps.check.outputs.has_pr }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Check if PR exists for this branch
         id: check
         env:

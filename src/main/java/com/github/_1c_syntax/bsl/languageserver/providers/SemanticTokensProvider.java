@@ -21,15 +21,17 @@
  */
 package com.github._1c_syntax.bsl.languageserver.providers;
 
+import com.github._1c_syntax.bsl.languageserver.client.ClientCapabilitiesHolder;
+import com.github._1c_syntax.bsl.languageserver.client.LanguageClientHolder;
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
+import com.github._1c_syntax.bsl.languageserver.context.events.ConfigurationTypesRegisteredEvent;
 import com.github._1c_syntax.bsl.languageserver.context.events.ServerContextDocumentClosedEvent;
 import com.github._1c_syntax.bsl.languageserver.context.events.ServerContextDocumentRemovedEvent;
+import com.github._1c_syntax.bsl.languageserver.context.events.ServerContextPopulatedEvent;
 import com.github._1c_syntax.bsl.languageserver.semantictokens.SemanticTokenEntry;
 import com.github._1c_syntax.bsl.languageserver.semantictokens.SemanticTokensSupplier;
-import com.github._1c_syntax.bsl.languageserver.utils.NamedForkJoinWorkerThreadFactory;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
+import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.SemanticTokens;
 import org.eclipse.lsp4j.SemanticTokensDelta;
@@ -37,7 +39,11 @@ import org.eclipse.lsp4j.SemanticTokensDeltaParams;
 import org.eclipse.lsp4j.SemanticTokensEdit;
 import org.eclipse.lsp4j.SemanticTokensParams;
 import org.eclipse.lsp4j.SemanticTokensRangeParams;
+import org.eclipse.lsp4j.SemanticTokensWorkspaceCapabilities;
+import org.eclipse.lsp4j.WorkspaceClientCapabilities;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
+import org.eclipse.lsp4j.services.LanguageClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
@@ -54,7 +60,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ForkJoinPool;
+import java.util.function.Function;
 
 /**
  * Провайдер для предоставления семантических токенов.
@@ -73,27 +79,19 @@ public class SemanticTokensProvider {
    */
   private static final int PARALLEL_PROCESSING_THRESHOLD = 1000;
 
-  @SuppressWarnings("NullAway.Init")
-  private ExecutorService executorService;
-
   private final List<SemanticTokensSupplier> suppliers;
+
+  @Qualifier("semanticTokensExecutor")
+  private final ExecutorService executor;
+
+  private final ClientCapabilitiesHolder clientCapabilitiesHolder;
+  private final LanguageClientHolder clientHolder;
 
   /**
    * Cache for storing previous token data by resultId.
    * Key: resultId, Value: token data list
    */
   private final Map<String, CachedTokenData> tokenCache = new ConcurrentHashMap<>();
-
-  @PostConstruct
-  private void init() {
-    var factory = new NamedForkJoinWorkerThreadFactory("semantic-tokens-");
-    executorService = new ForkJoinPool(ForkJoinPool.getCommonPoolParallelism(), factory, null, true);
-  }
-
-  @PreDestroy
-  private void onDestroy() {
-    executorService.shutdown();
-  }
 
   /**
    * Cached semantic token data associated with a document.
@@ -185,8 +183,8 @@ public class SemanticTokensProvider {
   ) {
     Range range = params.getRange();
 
-    // Collect tokens from all suppliers in parallel
-    var entries = collectTokens(documentContext);
+    // Collect tokens from all suppliers in parallel, scoping expensive suppliers to the range
+    var entries = collectTokens(documentContext, range);
 
     // Filter tokens that fall within the specified range
     var filteredEntries = filterTokensByRange(entries, range);
@@ -277,6 +275,59 @@ public class SemanticTokensProvider {
   @EventListener
   public void handleDocumentRemoved(ServerContextDocumentRemovedEvent event) {
     clearCache(event.getUri());
+  }
+
+  /**
+   * Обрабатывает событие завершения наполнения контекста сервера.
+   * <p>
+   * Часть сапплаеров (например, подсветка вызовов методов) опирается на индекс ссылок,
+   * который наполняется только после {@code populateContext}. Если клиент запросил токены
+   * до наполнения индекса, подсветка остаётся устаревшей до следующей правки файла.
+   * Поэтому по завершении наполнения контекста инициируется запрос
+   * {@code workspace/semanticTokens/refresh}.
+   *
+   * @param event Событие завершения наполнения контекста сервера.
+   */
+  @EventListener
+  public void handleServerContextPopulated(ServerContextPopulatedEvent event) {
+    refreshSemanticTokens();
+  }
+
+  /**
+   * Обрабатывает событие регистрации конфигурационных типов.
+   * <p>
+   * Self-члены модуля (реквизиты/платформенные методы объекта и т.п., которые
+   * {@code ReferenceIndexFiller} индексирует, а {@code SymbolsSemanticTokensSupplier}
+   * красит) резолвятся через self-тип из
+   * реестра типов, который конфигурационные провайдеры заполняют уже ПОСЛЕ
+   * {@link ServerContextPopulatedEvent}. Если клиент запросил токены до этой
+   * регистрации, подсветка остаётся устаревшей до следующей правки файла —
+   * поэтому по завершении регистрации типов тоже запрашивается
+   * {@code workspace/semanticTokens/refresh}.
+   *
+   * @param event Событие регистрации конфигурационных типов.
+   */
+  @EventListener
+  public void handleConfigurationTypesRegistered(ConfigurationTypesRegisteredEvent event) {
+    refreshSemanticTokens();
+  }
+
+  /**
+   * Отправить запрос на обновление семантических токенов.
+   * <p>
+   * Запрос отправляется только в случае поддержки клиентом возможности
+   * {@code workspace.semanticTokens.refreshSupport}.
+   */
+  public void refreshSemanticTokens() {
+    boolean refreshSupport = clientCapabilitiesHolder.getCapabilities()
+      .map(ClientCapabilities::getWorkspace)
+      .map(WorkspaceClientCapabilities::getSemanticTokens)
+      .map(SemanticTokensWorkspaceCapabilities::getRefreshSupport)
+      .orElse(Boolean.FALSE);
+
+    if (refreshSupport) {
+      clientHolder.execIfConnected(LanguageClient::refreshSemanticTokens);
+    }
   }
 
   /**
@@ -467,16 +518,32 @@ public class SemanticTokensProvider {
   }
 
   /**
-   * Collect tokens from all suppliers in parallel using ForkJoinPool.
+   * Собрать токены всех сапплаеров по всему документу (как для full-запроса).
+   * Package-private — используется регрессионным guard-тестом на пересечения.
    */
-  private List<SemanticTokenEntry> collectTokens(DocumentContext documentContext) {
+  List<SemanticTokenEntry> collectTokens(DocumentContext documentContext) {
+    return collectTokens(supplier -> supplier.getSemanticTokens(documentContext));
+  }
+
+  /**
+   * Собрать токены всех сапплаеров для запрошенного диапазона. Дорогие сапплаеры
+   * ограничивают тяжёлую работу диапазоном, дешёвые отдают полный набор (его
+   * затем триммит {@link #filterTokensByRange}).
+   */
+  private List<SemanticTokenEntry> collectTokens(DocumentContext documentContext, Range range) {
+    return collectTokens(supplier -> supplier.getSemanticTokens(documentContext, range));
+  }
+
+  private List<SemanticTokenEntry> collectTokens(
+    Function<SemanticTokensSupplier, List<SemanticTokenEntry>> invoker
+  ) {
     return CompletableFuture
       .supplyAsync(
         () -> suppliers.parallelStream()
-          .map(supplier -> supplier.getSemanticTokens(documentContext))
+          .map(invoker)
           .flatMap(Collection::stream)
           .toList(),
-        executorService
+        executor
       )
       .join();
   }

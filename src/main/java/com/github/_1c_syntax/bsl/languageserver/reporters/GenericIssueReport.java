@@ -22,10 +22,8 @@
 package com.github._1c_syntax.bsl.languageserver.reporters;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticCode;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticInfo;
+import com.github._1c_syntax.bsl.languageserver.diagnostics.info.DiagnosticInfo;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticType;
-import com.github._1c_syntax.bsl.languageserver.reporters.data.AnalysisInfo;
 import lombok.Getter;
 import lombok.Value;
 import org.eclipse.lsp4j.Diagnostic;
@@ -38,6 +36,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMessage;
 
 public class GenericIssueReport {
 
@@ -56,20 +55,6 @@ public class GenericIssueReport {
     @JsonProperty("issues") List<GenericIssueEntry> issues
   ) {
     this.issues = new ArrayList<>(issues);
-  }
-
-  public GenericIssueReport(AnalysisInfo analysisInfo, Map<String, DiagnosticInfo> diagnosticInfos) {
-    issues = new ArrayList<>();
-    for (var fileInfo : analysisInfo.fileinfos()) {
-      for (var diagnostic : fileInfo.getDiagnostics()) {
-        var entry = new GenericIssueEntry(
-          fileInfo.getPath().toString(),
-          diagnostic,
-          diagnosticInfos.get(DiagnosticCode.getStringValue(diagnostic.getCode()))
-        );
-        issues.add(entry);
-      }
-    }
   }
 
   @Value
@@ -138,7 +123,7 @@ public class GenericIssueReport {
     }
 
     public Location(String filePath, Diagnostic diagnostic) {
-      message = diagnostic.getMessage();
+      message = DiagnosticMessage.getStringValue(diagnostic.getMessage());
       this.filePath = filePath;
       textRange = new TextRange(diagnostic.getRange());
     }

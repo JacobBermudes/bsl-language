@@ -22,7 +22,7 @@
 package com.github._1c_syntax.bsl.languageserver.reporters;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticInfo;
+import com.github._1c_syntax.bsl.languageserver.diagnostics.info.DiagnosticInfo;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticSeverity;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -33,6 +33,7 @@ import org.eclipse.lsp4j.Diagnostic;
 import java.util.Map;
 
 import static org.apache.commons.codec.digest.DigestUtils.sha256Hex;
+import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMessage;
 
 @Getter
 @AllArgsConstructor
@@ -70,7 +71,7 @@ public class CodeQualityReportEntry {
   private final Location location;
 
   public CodeQualityReportEntry(String path, Diagnostic diagnostic, DiagnosticInfo diagnosticInfo) {
-    this.description = diagnostic.getMessage();
+    this.description = DiagnosticMessage.getStringValue(diagnostic.getMessage());
     this.checkName = diagnosticInfo.getCode().getStringValue();
     var fingerprintData = path + "//" + this.checkName + "//" + diagnostic.getRange();
     this.fingerprint = sha256Hex(fingerprintData);

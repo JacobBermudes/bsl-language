@@ -21,15 +21,16 @@
  */
 package com.github._1c_syntax.bsl.languageserver.codeactions;
 
-import com.github._1c_syntax.bsl.languageserver.configuration.LanguageServerConfiguration;
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticCode;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
-import com.github._1c_syntax.bsl.languageserver.utils.Resources;
+import com.github._1c_syntax.bsl.languageserver.configuration.Resources;
+import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.Token;
 import org.eclipse.lsp4j.CodeAction;
 import org.eclipse.lsp4j.CodeActionKind;
 import org.eclipse.lsp4j.CodeActionParams;
+import org.eclipse.lsp4j.CodeActionTriggerKind;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.Range;
 import org.eclipse.lsp4j.TextEdit;
@@ -54,14 +55,12 @@ import static com.github._1c_syntax.bsl.languageserver.providers.DiagnosticProvi
  * в указанной строке кода.
  */
 @Component
+@RequiredArgsConstructor
 public class DisableDiagnosticTriggeringSupplier implements CodeActionSupplier {
 
   private static final String ALL_DIAGNOSTIC_NAME = "";
-  private final LanguageServerConfiguration languageServerConfiguration;
 
-  public DisableDiagnosticTriggeringSupplier(LanguageServerConfiguration languageServerConfiguration) {
-    this.languageServerConfiguration = languageServerConfiguration;
-  }
+  private final Resources resources;
 
   /**
    * При необходимости создает {@code CodeAction} для создания служебного комментария отключающего срабатывание
@@ -80,7 +79,15 @@ public class DisableDiagnosticTriggeringSupplier implements CodeActionSupplier {
   public List<CodeAction> getCodeActions(CodeActionParams params, DocumentContext documentContext) {
     List<CodeAction> result = new ArrayList<>();
 
-    if (!params.getContext().getDiagnostics().isEmpty()) {
+    var diagnosticsPresent = !params.getContext().getDiagnostics().isEmpty();
+
+    // При автоматическом вызове (лампочка при движении курсора) предлагаем действия
+    // только если в контексте есть диагностики, иначе меню действий замусоривается на каждой строке.
+    if (isAutomaticTrigger(params) && !diagnosticsPresent) {
+      return result;
+    }
+
+    if (diagnosticsPresent) {
       if (params.getRange().getStart() != null && params.getRange().getEnd() != null) {
         var selectedLineNumber = params.getRange().getEnd().getLine() + 1;
 
@@ -119,6 +126,10 @@ public class DisableDiagnosticTriggeringSupplier implements CodeActionSupplier {
       )
     );
     return new ArrayList<>(result);
+  }
+
+  private static boolean isAutomaticTrigger(CodeActionParams params) {
+    return params.getContext().getTriggerKind() == CodeActionTriggerKind.Automatic;
   }
 
   private List<CodeAction> getDisableActionForLine(
@@ -223,11 +234,11 @@ public class DisableDiagnosticTriggeringSupplier implements CodeActionSupplier {
   }
 
   private String getMessage(String key) {
-    return Resources.getResourceString(languageServerConfiguration.getLanguage(), this.getClass(), key);
+    return resources.getResourceString(this.getClass(), key);
   }
 
   private String getMessage(String key, Object... args) {
-    return Resources.getResourceString(languageServerConfiguration.getLanguage(), this.getClass(), key, args);
+    return resources.getResourceString(this.getClass(), key, args);
   }
 
   private static List<TextEdit> createInLineTextEdits(String diagnosticName, Token last, CodeActionParams params) {

@@ -22,8 +22,7 @@
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticInfo;
-import com.github._1c_syntax.bsl.languageserver.utils.DiagnosticHelper;
+import com.github._1c_syntax.bsl.languageserver.diagnostics.info.DiagnosticInfo;
 import org.eclipse.lsp4j.Diagnostic;
 
 import java.util.List;
@@ -40,10 +39,26 @@ import java.util.Map;
  */
 public interface BSLDiagnostic {
 
+  /**
+   * Выполнить диагностику документа.
+   *
+   * @param documentContext Контекст документа, для которого выполняется диагностика
+   * @return Список найденных замечаний
+   */
   List<Diagnostic> getDiagnostics(DocumentContext documentContext);
 
+  /**
+   * Установить метаинформацию о диагностике.
+   *
+   * @param info Метаинформация о диагностике
+   */
   void setInfo(DiagnosticInfo info);
 
+  /**
+   * Получить метаинформацию о диагностике.
+   *
+   * @return Метаинформация о диагностике
+   */
   DiagnosticInfo getInfo();
 
   /**

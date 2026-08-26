@@ -21,29 +21,64 @@
  */
 package com.github._1c_syntax.bsl.languageserver.semantictokens;
 
-import com.github._1c_syntax.bsl.languageserver.util.CleanupContextBeforeClassAndAfterEachTestMethod;
+import com.github._1c_syntax.bsl.languageserver.context.AbstractServerContextAwareTest;
+import com.github._1c_syntax.bsl.languageserver.types.oscript.OScriptLibraryIndex;
+import com.github._1c_syntax.bsl.languageserver.types.registry.EventHandlerResolver;
+import com.github._1c_syntax.bsl.languageserver.util.CleanupContextBeforeClassAndAfterClass;
 import com.github._1c_syntax.bsl.languageserver.util.SemanticTokensTestHelper;
 import com.github._1c_syntax.bsl.languageserver.util.SemanticTokensTestHelper.ExpectedToken;
+import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
+import com.github._1c_syntax.bsl.types.ModuleType;
 import org.eclipse.lsp4j.SemanticTokenModifiers;
 import org.eclipse.lsp4j.SemanticTokenTypes;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import static org.mockito.Mockito.when;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 
-@SpringBootTest
-@CleanupContextBeforeClassAndAfterEachTestMethod
+@CleanupContextBeforeClassAndAfterClass
 @Import(SemanticTokensTestHelper.class)
-class SymbolsSemanticTokensSupplierTest {
+class SymbolsSemanticTokensSupplierTest extends AbstractServerContextAwareTest {
 
   @Autowired
   private SymbolsSemanticTokensSupplier supplier;
 
   @Autowired
   private SemanticTokensTestHelper helper;
+
+  @Autowired
+  private OScriptLibraryIndex oScriptLibraryIndex;
+
+  @MockitoBean
+  private EventHandlerResolver eventHandlerResolver;
+
+  @Test
+  void testEventHandlerMethodGetsEventTokenType() {
+    // given — резолвер стабится ДО создания документа: подробности см. в аналогичном тесте
+    // DocumentSymbolProviderTest.testEventHandlerMethodMarkedAsEventKind. Стабится isEventHandler,
+    // а не lookupContract — именно её опрашивает MethodSymbolComputer при построении дерева символов.
+    when(eventHandlerResolver.isEventHandler(ArgumentMatchers.any(), ArgumentMatchers.eq("ПриЗаписи")))
+      .thenReturn(true);
+
+    String bsl = """
+      Процедура ПриЗаписи(Отказ)
+      КонецПроцедуры
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokens(bsl, supplier);
+
+    // then — имя обработчика красится как Event, а не Method
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(0, 10, 9, SemanticTokenTypes.Event, "ПриЗаписи")
+    ));
+  }
 
   @Test
   void testMethodDeclaration() {
@@ -57,9 +92,9 @@ class SymbolsSemanticTokensSupplierTest {
     // when
     var decoded = helper.getDecodedTokens(bsl, supplier);
 
-    // then - function name should be highlighted as Function
+    // then - function name should be highlighted as Method (declared functions are methods)
     helper.assertContainsTokens(decoded, List.of(
-      new ExpectedToken(0, 8, 10, SemanticTokenTypes.Function, "МояФункция")
+      new ExpectedToken(0, 8, 10, SemanticTokenTypes.Method, "МояФункция")
     ));
   }
 
@@ -101,6 +136,95 @@ class SymbolsSemanticTokensSupplierTest {
       // Parameter usages in the body
       new ExpectedToken(1, 10, 9, SemanticTokenTypes.Parameter, "Параметр1"),
       new ExpectedToken(1, 22, 9, SemanticTokenTypes.Parameter, "Параметр2")
+    ));
+  }
+
+  @Test
+  void testStaticModifierOnCommonModuleMethodDeclaration() {
+    // given - конфигурация с ПервыйОбщийМодуль.
+    initServerContextOnce(Path.of(TestUtils.PATH_TO_METADATA));
+    var dc = context.getDocument("CommonModule.ПервыйОбщийМодуль", ModuleType.CommonModule)
+      .orElseThrow();
+
+    // when
+    var decoded = helper.decodeFromEntries(supplier.getSemanticTokens(dc));
+
+    // then - НеУстаревшаяПроцедура (line 60, col 10, length 21) → Method+Static.
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(60, 10, 21, SemanticTokenTypes.Method,
+        Set.of(SemanticTokenModifiers.Static), "НеУстаревшаяПроцедура")
+    ));
+  }
+
+  @Test
+  void testStaticModifierOnOScriptModuleMethodDeclaration() {
+    // given - OScript-библиотека mylib с модулем MyModule.
+    var fixtureRoot = Path.of("src/test/resources/oscript-libraries/mylib").toAbsolutePath();
+    initServerContext(fixtureRoot, false);
+    var moduleUri = oScriptLibraryIndex.findModuleUri("MyModule").orElseThrow();
+    var dc = context.getDocument(moduleUri);
+
+    // when
+    var decoded = helper.decodeFromEntries(supplier.getSemanticTokens(dc));
+
+    // then - Процедура ВывестиСообщение (line 2, col 10, length 16) → Method+Static.
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(2, 10, 16, SemanticTokenTypes.Method,
+        Set.of(SemanticTokenModifiers.Static), "ВывестиСообщение")
+    ));
+  }
+
+  @Test
+  void testAsyncModifierOnAsyncFunctionDeclaration() {
+    // given
+    String bsl = """
+      Асинх Функция ОбработатьАсинхронно()
+        Возврат 1;
+      КонецФункции
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokens(bsl, supplier);
+
+    // then
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(0, 14, 20, SemanticTokenTypes.Method,
+        Set.of(SemanticTokenModifiers.Async), "ОбработатьАсинхронно")
+    ));
+  }
+
+  @Test
+  void testAsyncModifierOnAsyncProcedureDeclaration() {
+    // given
+    String bsl = """
+      Асинх Процедура ВыполнитьАсинхронно()
+      КонецПроцедуры
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokens(bsl, supplier);
+
+    // then
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(0, 16, 19, SemanticTokenTypes.Method,
+        Set.of(SemanticTokenModifiers.Async), "ВыполнитьАсинхронно")
+    ));
+  }
+
+  @Test
+  void testAsyncModifierAbsentOnRegularMethod() {
+    // given
+    String bsl = """
+      Процедура Обычная()
+      КонецПроцедуры
+      """;
+
+    // when
+    var decoded = helper.getDecodedTokens(bsl, supplier);
+
+    // then — нет модификатора Async у обычного метода
+    helper.assertContainsTokens(decoded, List.of(
+      new ExpectedToken(0, 10, 7, SemanticTokenTypes.Method, "Обычная")
     ));
   }
 

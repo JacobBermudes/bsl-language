@@ -21,9 +21,9 @@
  */
 package com.github._1c_syntax.bsl.languageserver.aop.sentry;
 
-import com.github._1c_syntax.bsl.languageserver.configuration.LanguageServerConfiguration;
+import com.github._1c_syntax.bsl.languageserver.configuration.GlobalLanguageServerConfiguration;
 import com.github._1c_syntax.bsl.languageserver.configuration.SendErrorsMode;
-import com.github._1c_syntax.bsl.languageserver.events.LanguageServerInitializeRequestReceivedEvent;
+import com.github._1c_syntax.bsl.languageserver.events.LanguageServerInitializedEvent;
 import com.github._1c_syntax.bsl.languageserver.util.CleanupContextBeforeClassAndAfterEachTestMethod;
 import io.sentry.Sentry;
 import io.sentry.SentryEvent;
@@ -33,6 +33,8 @@ import org.eclipse.lsp4j.services.LanguageServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
@@ -54,7 +56,7 @@ class SentryScopeConfigurerTest {
   private ApplicationEventPublisher eventPublisher;
 
   @Autowired
-  private LanguageServerConfiguration configuration;
+  private GlobalLanguageServerConfiguration configuration;
 
   private final AtomicReference<SentryEvent> capturedEvent = new AtomicReference<>();
 
@@ -83,7 +85,7 @@ class SentryScopeConfigurerTest {
     var initializeParams = new InitializeParams();
     initializeParams.setClientInfo(new ClientInfo("Test Client", "1.2.3"));
 
-    var event = new LanguageServerInitializeRequestReceivedEvent(
+    var event = new LanguageServerInitializedEvent(
       mock(LanguageServer.class),
       initializeParams
     );
@@ -105,7 +107,7 @@ class SentryScopeConfigurerTest {
     var initializeParams = new InitializeParams();
     // clientInfo is null by default
 
-    var event = new LanguageServerInitializeRequestReceivedEvent(
+    var event = new LanguageServerInitializedEvent(
       mock(LanguageServer.class),
       initializeParams
     );
@@ -130,7 +132,7 @@ class SentryScopeConfigurerTest {
     when(clientInfo.getVersion()).thenReturn(null);
     initializeParams.setClientInfo(clientInfo);
 
-    var event = new LanguageServerInitializeRequestReceivedEvent(
+    var event = new LanguageServerInitializedEvent(
       mock(LanguageServer.class),
       initializeParams
     );
@@ -144,5 +146,26 @@ class SentryScopeConfigurerTest {
     assertThat(capturedEvent.get()).isNotNull();
     assertThat(capturedEvent.get().getTags()).containsEntry("client.name", "UNKNOWN");
     assertThat(capturedEvent.get().getTags()).containsEntry("client.version", "UNKNOWN");
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "1.0.0,        production",
+    "1.2.34,       production",
+    "1.0.0-rc.2,   pre-release",
+    "1.0.0-rc2,    pre-release",
+    "1.0.0-ra.1,   pre-release",
+    "1.0.0-ra1,    pre-release",
+    "develop-1234, develop",
+    "develop-1234-DIRTY-abcdef, feature",
+    "1.0.0-alpha,  feature",
+    "feature-foo,  feature"
+  })
+  void testResolveEnvironment(String version, String expectedEnvironment) {
+    // when
+    var environment = SentryScopeConfigurer.resolveEnvironment(version);
+
+    // then
+    assertThat(environment).isEqualTo(expectedEnvironment);
   }
 }

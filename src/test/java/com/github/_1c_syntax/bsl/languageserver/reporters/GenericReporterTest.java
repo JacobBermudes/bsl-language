@@ -21,9 +21,12 @@
  */
 package com.github._1c_syntax.bsl.languageserver.reporters;
 
-import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticInfo;
+import com.github._1c_syntax.bsl.languageserver.context.AbstractServerContextAwareTest;
+import com.github._1c_syntax.bsl.languageserver.diagnostics.infrastructure.DiagnosticInfos;
+import com.github._1c_syntax.bsl.languageserver.diagnostics.info.DiagnosticInfo;
 import com.github._1c_syntax.bsl.languageserver.reporters.data.AnalysisInfo;
 import com.github._1c_syntax.bsl.languageserver.reporters.data.FileInfo;
+import com.github._1c_syntax.bsl.languageserver.util.CleanupContextBeforeClassAndAfterEachTestMethod;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import org.apache.commons.io.FileUtils;
@@ -49,18 +52,29 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
-class GenericReporterTest {
+@CleanupContextBeforeClassAndAfterEachTestMethod
+class GenericReporterTest extends AbstractServerContextAwareTest {
+
+  private static final String SOURCE_DIR = ".";
 
   @Autowired
   private GenericIssueReporter reporter;
 
   @Autowired
+  private DiagnosticInfos diagnosticInfosBean;
+
   private Map<String, DiagnosticInfo> diagnosticInfos;
 
   private final File file = new File("./bsl-generic-json.json");
 
   @BeforeEach
   void setUp() {
+    // Workspace нужен только для резолва workspace-scoped бинов: отчёт строится из
+    // AnalysisInfo, а не из содержимого контекста. Пустой каталог вместо корня проекта —
+    // регистрация корня индексировала бы OneScript-библиотеки всего репозитория
+    // (чтение и разбор каждого .os) на каждый тест-метод.
+    initServerContext();
+    diagnosticInfos = diagnosticInfosBean.getByCode();
     FileUtils.deleteQuietly(file);
   }
 
@@ -106,12 +120,11 @@ class GenericReporterTest {
     Location location = new Location("file:///fake-uri2.bsl", Ranges.create(0, 2, 2, 3));
     diagnostics.getFirst().setRelatedInformation(Collections.singletonList(new DiagnosticRelatedInformation(location, "message")));
 
-    String sourceDir = ".";
-    FileInfo fileInfo = new FileInfo(sourceDir, documentContext, diagnostics);
-    AnalysisInfo analysisInfo = new AnalysisInfo(LocalDateTime.now(), Collections.singletonList(fileInfo), sourceDir);
+    FileInfo fileInfo = new FileInfo(SOURCE_DIR, documentContext, diagnostics);
+    AnalysisInfo analysisInfo = new AnalysisInfo(LocalDateTime.now(), Collections.singletonList(fileInfo), SOURCE_DIR);
 
     // when
-    reporter.report(analysisInfo, Path.of(sourceDir));
+    ReporterTestDriver.report(reporter, analysisInfo, Path.of("."));
 
     // then
     var mapper = new JsonMapper();
@@ -124,6 +137,11 @@ class GenericReporterTest {
     assertThat(report.getIssues().get(0).getSecondaryLocations()).hasSize(1);
     assertThat(report.getIssues().get(2).getRuleId()).isEqualTo(secondInfo.getCode().getStringValue());
     assertThat(report.getIssues().get(1).getSeverity()).isEqualTo(firstInfo.getSeverity().name());
+  }
+
+  @Test
+  void doesNotRequireMetricCalculation() {
+    assertThat(reporter.isMetricCalculationRequired()).isFalse();
   }
 
 }

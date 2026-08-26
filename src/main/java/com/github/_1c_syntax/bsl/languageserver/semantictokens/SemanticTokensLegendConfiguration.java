@@ -53,6 +53,7 @@ public class SemanticTokensLegendConfiguration {
       SemanticTokenTypes.Comment,
       SemanticTokenTypes.Function,
       SemanticTokenTypes.Method,
+      SemanticTokenTypes.Event,  // Added for platform event handler methods
       SemanticTokenTypes.Variable,
       SemanticTokenTypes.Parameter,
       SemanticTokenTypes.Macro,
@@ -63,7 +64,8 @@ public class SemanticTokensLegendConfiguration {
       SemanticTokenTypes.Property,  // Added for SDBL field names
       SemanticTokenTypes.Class,  // Added for SDBL metadata object names (e.g. Справочник.Контрагенты, РегистрСведений.КурсыВалют)
       SemanticTokenTypes.Enum,  // Added for SDBL enum types (Перечисление.Пол)
-      SemanticTokenTypes.EnumMember  // Added for predefined elements and enum values
+      SemanticTokenTypes.EnumMember,  // Added for predefined elements and enum values
+      CustomSemanticTokenTypes.STRING_ESCAPE  // Escaped double quotes "" in lambda strings
     );
 
     List<String> tokenModifiers = List.of(
@@ -71,7 +73,9 @@ public class SemanticTokensLegendConfiguration {
       SemanticTokenModifiers.Definition,
       SemanticTokenModifiers.DefaultLibrary,  // Added for SDBL built-in functions and types
       SemanticTokenModifiers.Declaration,  // Added for SDBL alias declarations
-      SemanticTokenModifiers.Readonly  // Added for SDBL parameters
+      SemanticTokenModifiers.Readonly,  // Added for SDBL parameters
+      SemanticTokenModifiers.Static,  // Methods of CommonModule / ManagerModule / OScript-module
+      SemanticTokenModifiers.Async  // Methods declared as Асинх/Async (both declarations and call sites)
     );
 
     return new SemanticTokensLegend(tokenTypes, tokenModifiers);

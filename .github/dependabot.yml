@@ -9,12 +9,12 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "daily"
+    ignore:
+      - dependency-name: "com.diffplug.spotless"
     groups:
       freefair:
         patterns:
           - "io.freefair.*"
-    ignore:
-      - dependency-name: "com.diffplug.spotless"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

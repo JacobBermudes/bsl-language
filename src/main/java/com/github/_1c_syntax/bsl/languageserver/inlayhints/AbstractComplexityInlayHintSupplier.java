@@ -23,10 +23,12 @@ package com.github._1c_syntax.bsl.languageserver.inlayhints;
 
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
 import com.github._1c_syntax.bsl.languageserver.context.computer.ComplexitySecondaryLocation;
+import com.github._1c_syntax.bsl.languageserver.context.events.ServerContextDocumentClosedEvent;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.MethodSymbol;
 import org.eclipse.lsp4j.InlayHint;
 import org.eclipse.lsp4j.InlayHintKind;
 import org.eclipse.lsp4j.InlayHintParams;
+import org.springframework.context.event.EventListener;
 
 import java.net.URI;
 import java.util.Collection;
@@ -43,9 +45,20 @@ import java.util.stream.Collectors;
  * <p>
  * По умолчанию подсказки отключены. Для включения нужно вызвать метод {@link #toggleHints(URI, String)}.
  */
-public abstract class AbstractComplexityInlayHintSupplier implements InlayHintSupplier {
+public abstract class AbstractComplexityInlayHintSupplier implements InlayHintSupplier<DefaultInlayHintData> {
 
   private final Map<URI, Set<String>> enabledMethods = new HashMap<>();
+
+  /**
+   * {@inheritDoc}
+   * <p>
+   * Подсказки сложности не откладывают построение полей на резолв, поэтому
+   * используется дефолтный дата-класс {@link DefaultInlayHintData}.
+   */
+  @Override
+  public Class<DefaultInlayHintData> getInlayHintDataClass() {
+    return DefaultInlayHintData.class;
+  }
 
   /**
    * Получение подсказок о местах увеличения сложности метода.
@@ -81,6 +94,16 @@ public abstract class AbstractComplexityInlayHintSupplier implements InlayHintSu
     } else {
       methodsInFile.add(methodName);
     }
+  }
+
+  /**
+   * Очищает состояние подсказок при закрытии документа.
+   *
+   * @param event событие закрытия документа
+   */
+  @EventListener
+  public void handleDocumentClosed(ServerContextDocumentClosedEvent event) {
+    enabledMethods.remove(event.getDocumentContext().getUri());
   }
 
   /**

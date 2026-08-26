@@ -22,6 +22,7 @@
 package com.github._1c_syntax.bsl.languageserver.context.symbol;
 
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
+import com.github._1c_syntax.bsl.languageserver.context.symbol.annotations.Annotation;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.variable.VariableKind;
 import com.github._1c_syntax.bsl.parser.description.VariableDescription;
 import lombok.Builder;
@@ -101,7 +102,7 @@ public abstract class AbstractVariableSymbol implements VariableSymbol {
 
   @Override
   public VariableKind getKind() {
-    return VariableKind.values()[kind];
+    return VariableKind.byOrdinal(kind);
   }
 
   @Override
@@ -123,6 +124,10 @@ public abstract class AbstractVariableSymbol implements VariableSymbol {
     @Setter
     @Accessors(fluent = true, chain = true)
     Optional<SourceDefinedSymbol> parent = Optional.empty();
+
+    @Setter
+    @Accessors(fluent = true, chain = true)
+    private List<Annotation> annotations = Collections.emptyList();
 
     private int startLine;
     private int startCharacter;
@@ -154,6 +159,28 @@ public abstract class AbstractVariableSymbol implements VariableSymbol {
     }
 
     public VariableSymbol build() {
+
+      // Аннотированные переменные редки (поля-желуди ОСени) — отдельный
+      // подкласс с ссылкой на список, чтобы не утяжелять остальные символы.
+      if (annotations != null && !annotations.isEmpty()) {
+        return new AnnotatedVariableSymbol(
+          name,
+          scope,
+          owner,
+          parent,
+          (byte) kind.ordinal(),
+          export,
+          description,
+          startLine,
+          startCharacter,
+          endLine,
+          endCharacter,
+          variableNameLine,
+          variableNameStartCharacter,
+          variableNameEndCharacter,
+          annotations
+        );
+      }
 
       // Ленивое булево вычисление диапазона переменной
       var shortBased = startLine <= Short.MAX_VALUE

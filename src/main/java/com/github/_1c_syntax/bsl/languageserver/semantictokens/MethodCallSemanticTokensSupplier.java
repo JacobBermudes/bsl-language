@@ -22,8 +22,11 @@
 package com.github._1c_syntax.bsl.languageserver.semantictokens;
 
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
+import com.github._1c_syntax.bsl.languageserver.context.symbol.MethodSymbol;
 import com.github._1c_syntax.bsl.languageserver.references.ReferenceIndex;
+import com.github._1c_syntax.bsl.languageserver.context.Modules;
 import lombok.RequiredArgsConstructor;
+import org.eclipse.lsp4j.SemanticTokenModifiers;
 import org.eclipse.lsp4j.SemanticTokenTypes;
 import org.eclipse.lsp4j.SymbolKind;
 import org.springframework.stereotype.Component;
@@ -38,6 +41,14 @@ import java.util.List;
 @RequiredArgsConstructor
 public class MethodCallSemanticTokensSupplier implements SemanticTokensSupplier {
 
+  private static final String[] NO_MODIFIERS = new String[0];
+  private static final String[] ASYNC_MODIFIERS = {SemanticTokenModifiers.Async};
+  private static final String[] STATIC_MODIFIERS = {SemanticTokenModifiers.Static};
+  private static final String[] STATIC_ASYNC_MODIFIERS = {
+    SemanticTokenModifiers.Static,
+    SemanticTokenModifiers.Async
+  };
+
   private final ReferenceIndex referenceIndex;
   private final SemanticTokensHelper helper;
 
@@ -51,11 +62,30 @@ public class MethodCallSemanticTokensSupplier implements SemanticTokensSupplier 
         continue;
       }
 
-      reference.getSourceDefinedSymbol()
-        .ifPresent(symbol -> helper.addRange(entries, reference.selectionRange(), SemanticTokenTypes.Method));
+      reference.getSourceDefinedSymbol().ifPresent(symbol -> {
+        if (!(symbol instanceof MethodSymbol method)) {
+          helper.addRange(entries, reference.selectionRange(), SemanticTokenTypes.Method);
+          return;
+        }
+        // Метод объявлен в «статическом» модуле (CommonModule/ManagerModule/OScript-модуль)?
+        // Тогда подсвечиваем вызов как Method + Static. instance-методы
+        // (ObjectModule, формы, OScript-классы) остаются без Static.
+        // Вызовы async-методов получают модификатор Async — это касается и
+        // statics, и instance-методов, поэтому Async может комбинироваться со Static.
+        boolean isStatic = Modules.isStaticModule(method.getOwner());
+        var modifiers = methodCallModifiers(isStatic, method.isAsync());
+        helper.addRange(entries, reference.selectionRange(), SemanticTokenTypes.Method, modifiers);
+      });
     }
 
     return entries;
+  }
+
+  private static String[] methodCallModifiers(boolean isStatic, boolean isAsync) {
+    if (isStatic) {
+      return isAsync ? STATIC_ASYNC_MODIFIERS : STATIC_MODIFIERS;
+    }
+    return isAsync ? ASYNC_MODIFIERS : NO_MODIFIERS;
   }
 }
 

@@ -21,9 +21,11 @@
  */
 package com.github._1c_syntax.bsl.languageserver.aop;
 
+import com.github._1c_syntax.bsl.languageserver.configuration.GlobalLanguageServerConfiguration;
 import com.github._1c_syntax.bsl.languageserver.configuration.LanguageServerConfiguration;
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
 import com.github._1c_syntax.bsl.languageserver.context.ServerContext;
+import com.github._1c_syntax.bsl.languageserver.context.ServerContextProvider;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.BSLDiagnostic;
 import org.aspectj.lang.annotation.Pointcut;
 import org.eclipse.lsp4j.services.LanguageServer;
@@ -48,6 +50,14 @@ public class Pointcuts {
    */
   @Pointcut("within(com.github._1c_syntax.bsl.languageserver.configuration.LanguageServerConfiguration)")
   public void isLanguageServerConfiguration() {
+    // no-op
+  }
+
+  /**
+   * Это обращение к классу {@link GlobalLanguageServerConfiguration}.
+   */
+  @Pointcut("within(com.github._1c_syntax.bsl.languageserver.configuration.GlobalLanguageServerConfiguration)")
+  public void isGlobalLanguageServerConfiguration() {
     // no-op
   }
 
@@ -92,10 +102,26 @@ public class Pointcuts {
   }
 
   /**
+   * Это обращение к классу {@link ServerContextProvider}.
+   */
+  @Pointcut("within(com.github._1c_syntax.bsl.languageserver.context.ServerContextProvider)")
+  public void isServerContextProvider() {
+    // no-op
+  }
+
+  /**
    * Это обращение к реализации интерфейса {@link BSLDiagnostic}.
    */
   @Pointcut("within(com.github._1c_syntax.bsl.languageserver.diagnostics.BSLDiagnostic+)")
   public void isBSLDiagnostic() {
+    // no-op
+  }
+
+  /**
+   * Это обращение к классу {@code OScriptLibraryIndex}.
+   */
+  @Pointcut("within(com.github._1c_syntax.bsl.languageserver.types.oscript.OScriptLibraryIndex)")
+  public void isOScriptLibraryIndex() {
     // no-op
   }
 
@@ -108,10 +134,26 @@ public class Pointcuts {
   }
 
   /**
+   * Это вызов метода tryClearDocument.
+   */
+  @Pointcut("isBSLLanguageServerScope() && execution(* tryClearDocument(..))")
+  public void isTryClearDocumentCall() {
+    // no-op
+  }
+
+  /**
    * Это вызов метода populateContext.
    */
   @Pointcut("isBSLLanguageServerScope() && execution(* populateContext(..))")
   public void isPopulateContextCall() {
+    // no-op
+  }
+
+  /**
+   * Это вызов метода addDocument.
+   */
+  @Pointcut("isBSLLanguageServerScope() && execution(* addDocument(..))")
+  public void isAddDocumentCall() {
     // no-op
   }
 
@@ -160,6 +202,46 @@ public class Pointcuts {
    */
   @Pointcut("isBSLLanguageServerScope() && execution(* initialize(..))")
   public void isInitializeCall() {
+    // no-op
+  }
+
+  /**
+   * Это вызов метода addWorkspace.
+   */
+  @Pointcut("isBSLLanguageServerScope() && execution(* addWorkspace(..))")
+  public void isAddWorkspaceCall() {
+    // no-op
+  }
+
+  /**
+   * Это вызов метода removeWorkspace.
+   */
+  @Pointcut("isBSLLanguageServerScope() && execution(* removeWorkspace(..))")
+  public void isRemoveWorkspaceCall() {
+    // no-op
+  }
+
+  /**
+   * Это вызов метода reindex.
+   */
+  @Pointcut("isBSLLanguageServerScope() && execution(* reindex(..))")
+  public void isReindexCall() {
+    // no-op
+  }
+
+  /**
+   * Это обращение к классу {@code ConfigurationTypesProvider}.
+   */
+  @Pointcut("within(com.github._1c_syntax.bsl.languageserver.types.registry.ConfigurationTypesProvider)")
+  public void isConfigurationTypesProvider() {
+    // no-op
+  }
+
+  /**
+   * Это вызов метода tryRegister.
+   */
+  @Pointcut("isBSLLanguageServerScope() && execution(* tryRegister(..))")
+  public void isTryRegisterCall() {
     // no-op
   }
 

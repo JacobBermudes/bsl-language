@@ -21,8 +21,9 @@
  */
 package com.github._1c_syntax.bsl.languageserver.references;
 
+import com.github._1c_syntax.bsl.languageserver.context.AbstractServerContextAwareTest;
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
-import com.github._1c_syntax.bsl.languageserver.context.ServerContext;
+import com.github._1c_syntax.bsl.languageserver.context.events.DocumentContextContentChangedEvent;
 import com.github._1c_syntax.bsl.languageserver.context.events.ServerContextDocumentRemovedEvent;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.MethodSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.Symbol;
@@ -48,15 +49,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @CleanupContextBeforeClassAndAfterEachTestMethod
-class ReferenceIndexFillerTest {
+class ReferenceIndexFillerTest extends AbstractServerContextAwareTest {
+
+  private static final String PATH_TO_METADATA = "src/test/resources/metadata/designer";
 
   @Autowired
   private ReferenceIndexFiller referenceIndexFiller;
   @Autowired
   private ReferenceIndex referenceIndex;
-
-  @Autowired
-  private ServerContext serverContext;
 
   @Test
   void testFindCalledMethod() {
@@ -78,6 +78,45 @@ class ReferenceIndexFillerTest {
     assertThat(referencedSymbol).get()
       .extracting(Reference::selectionRange)
       .isEqualTo(Ranges.create(4, 0, 4, 9));
+  }
+
+  @Test
+  void rereadOfSameContentKeepsReferences() {
+    // given: документ проиндексирован.
+    var documentContext = TestUtils.getDocumentContextFromFile(
+      "./src/test/resources/references/ReferenceIndexFillerTest.bsl");
+    referenceIndexFiller.handleEvent(new DocumentContextContentChangedEvent(documentContext));
+    assertThat(referenceIndex.getReference(documentContext.getUri(), new Position(4, 0)))
+      .as("вхождения собраны первым разбором")
+      .isPresent();
+
+    // when: тот же самый текст разобран заново — обходить дерево незачем.
+    referenceIndexFiller.handleEvent(new DocumentContextContentChangedEvent(documentContext, false));
+
+    // then
+    assertThat(referenceIndex.getReference(documentContext.getUri(), new Position(4, 0))).isPresent();
+  }
+
+  @Test
+  void rereadOfSameContentIndexesAgainAfterDocumentWasRemoved() {
+    // given: документ проиндексирован, а затем удалён из рабочей области — вместе со
+    // вхождениями снят и признак «индексация дошла до конца».
+    var documentContext = TestUtils.getDocumentContextFromFile(
+      "./src/test/resources/references/ReferenceIndexFillerTest.bsl");
+    referenceIndexFiller.handleEvent(new DocumentContextContentChangedEvent(documentContext));
+    assertThat(referenceIndex.getReference(documentContext.getUri(), new Position(4, 0)))
+      .as("вхождения собраны первым разбором")
+      .isPresent();
+    referenceIndexFiller.handleEvent(
+      new ServerContextDocumentRemovedEvent(documentContext.getServerContext(), documentContext.getUri()));
+    assertThat(referenceIndex.getReference(documentContext.getUri(), new Position(4, 0))).isEmpty();
+
+    // when: тот же самый текст разобран заново.
+    referenceIndexFiller.handleEvent(new DocumentContextContentChangedEvent(documentContext, false));
+
+    // then: пропуск разрешён только когда вхождения уже собраны, иначе индекс остался бы
+    // пустым до следующей правки файла.
+    assertThat(referenceIndex.getReference(documentContext.getUri(), new Position(4, 0))).isPresent();
   }
 
   @Test
@@ -103,26 +142,59 @@ class ReferenceIndexFillerTest {
   }
 
   @Test
-  void testFindNotifyDescriptionConfiguration() throws IOException {
-    var path = Absolute.path("src/test/resources/metadata/designer");
-    serverContext.setConfigurationRoot(path);
+  void testFindHandlersAttachedByName() {
+    // Обработчик, подключённый именем-строкой, иначе выглядит никем не вызываемым:
+    // других обращений к нему в модуле нет.
+    var documentContext = TestUtils.getDocumentContextFromFile(
+      "./src/test/resources/references/ReferenceIndexAttachedHandlers.bsl");
+    referenceIndexFiller.fill(documentContext);
 
-    var file = new File("src/test/resources/metadata/designer",
+    assertThat(referencesTo(documentContext, "ОбработчикОжидания"))
+      .as("подключение и отключение — две ссылки")
+      .hasSize(2);
+    assertThat(referencesTo(documentContext, "ОбработчикАнглийский")).hasSize(1);
+    assertThat(referencesTo(documentContext, "ТоварыПриИзменении"))
+      .as("действие элемента формы — второй параметр вызова")
+      .hasSize(1);
+    assertThat(referencesTo(documentContext, "ЦенаПриИзменении")).hasSize(1);
+    assertThat(referencesTo(documentContext, "ДатаИзменена"))
+      .as("обработчик изменения данных — второй параметр, подключение и отключение")
+      .hasSize(2);
+
+    assertThat(referencesTo(documentContext, "ОбработчикИзПеременной"))
+      .as("имя собрано в переменной — статически неизвестно")
+      .isEmpty();
+    assertThat(referencesTo(documentContext, "ОбработчикСобытияПоИмениСобытия"))
+      .as("первый параметр УстановитьДействие — имя события, а не обработчика")
+      .isEmpty();
+  }
+
+  private List<Reference> referencesTo(DocumentContext documentContext, String methodName) {
+    var method = documentContext.getSymbolTree().getMethodSymbol(methodName);
+    assertThat(method).as("метод %s", methodName).isPresent();
+    return referenceIndex.getReferencesTo(method.get());
+  }
+
+  @Test
+  void testFindNotifyDescriptionConfiguration() throws IOException {
+    initServerContext(PATH_TO_METADATA);
+
+    var file = new File(PATH_TO_METADATA,
       "Documents/Документ1/Forms/ФормаДокумента/Ext/Form/Module.bsl");
     var uri = Absolute.uri(file);
     TestUtils.getDocumentContext(
       uri,
       FileUtils.readFileToString(file, StandardCharsets.UTF_8),
-      serverContext
+      context
     );
 
-    file = new File("src/test/resources/metadata/designer",
+    file = new File(PATH_TO_METADATA,
       "CommonModules/КлиентскийОбщийМодуль/Ext/Module.bsl");
     uri = Absolute.uri(file);
     var documentContext = TestUtils.getDocumentContext(
       uri,
       FileUtils.readFileToString(file, StandardCharsets.UTF_8),
-      serverContext
+      context
     );
 
     var method = documentContext.getSymbolTree().getMethodSymbol("ОбработчикОписаниеОповещения");
@@ -290,21 +362,21 @@ class ReferenceIndexFillerTest {
 
   @Test
   void testFindCommonModuleVariableReferences() throws IOException {
-    var path = Absolute.path("src/test/resources/metadata/designer");
-    serverContext.setConfigurationRoot(path);
+    initServerContext(PATH_TO_METADATA);
+
 
     var documentContext = TestUtils.getDocumentContextFromFile(
       "./src/test/resources/references/ReferenceIndexCommonModuleVariable.bsl"
     );
 
     // Load the common module that will be referenced
-    var file = new File("src/test/resources/metadata/designer",
+    var file = new File(PATH_TO_METADATA,
       "CommonModules/ПервыйОбщийМодуль/Ext/Module.bsl");
     var uri = Absolute.uri(file);
     var commonModuleContext = TestUtils.getDocumentContext(
       uri,
       FileUtils.readFileToString(file, StandardCharsets.UTF_8),
-      serverContext
+      context
     );
 
     referenceIndexFiller.fill(documentContext);
@@ -332,21 +404,21 @@ class ReferenceIndexFillerTest {
 
   @Test
   void testCommonModuleVariableReassignment() throws IOException {
-    var path = Absolute.path("src/test/resources/metadata/designer");
-    serverContext.setConfigurationRoot(path);
+    initServerContext(PATH_TO_METADATA);
+
 
     var documentContext = TestUtils.getDocumentContextFromFile(
       "./src/test/resources/references/ReferenceIndexCommonModuleReassignment.bsl"
     );
 
     // Load the common module that will be referenced
-    var file = new File("src/test/resources/metadata/designer",
+    var file = new File(PATH_TO_METADATA,
       "CommonModules/ПервыйОбщийМодуль/Ext/Module.bsl");
     var uri = Absolute.uri(file);
     var commonModuleContext = TestUtils.getDocumentContext(
       uri,
       FileUtils.readFileToString(file, StandardCharsets.UTF_8),
-      serverContext
+      context
     );
 
     referenceIndexFiller.fill(documentContext);
@@ -375,21 +447,21 @@ class ReferenceIndexFillerTest {
 
   @Test
   void testCommonModuleModuleLevelVariable() throws IOException {
-    var path = Absolute.path("src/test/resources/metadata/designer");
-    serverContext.setConfigurationRoot(path);
+    initServerContext(PATH_TO_METADATA);
+
 
     var documentContext = TestUtils.getDocumentContextFromFile(
       "./src/test/resources/references/ReferenceIndexCommonModuleLevel.bsl"
     );
 
     // Load the common module that will be referenced
-    var file = new File("src/test/resources/metadata/designer",
+    var file = new File(PATH_TO_METADATA,
       "CommonModules/ПервыйОбщийМодуль/Ext/Module.bsl");
     var uri = Absolute.uri(file);
     var commonModuleContext = TestUtils.getDocumentContext(
       uri,
       FileUtils.readFileToString(file, StandardCharsets.UTF_8),
-      serverContext
+      context
     );
 
     referenceIndexFiller.fill(documentContext);
@@ -416,21 +488,21 @@ class ReferenceIndexFillerTest {
 
   @Test
   void testCommonModuleVariableIsolationBetweenMethods() throws IOException {
-    var path = Absolute.path("src/test/resources/metadata/designer");
-    serverContext.setConfigurationRoot(path);
+    initServerContext(PATH_TO_METADATA);
+
 
     var documentContext = TestUtils.getDocumentContextFromFile(
       "./src/test/resources/references/ReferenceIndexCommonModuleIsolation.bsl"
     );
 
     // Load the common module that will be referenced
-    var file = new File("src/test/resources/metadata/designer",
+    var file = new File(PATH_TO_METADATA,
       "CommonModules/ПервыйОбщийМодуль/Ext/Module.bsl");
     var uri = Absolute.uri(file);
     var commonModuleContext = TestUtils.getDocumentContext(
       uri,
       FileUtils.readFileToString(file, StandardCharsets.UTF_8),
-      serverContext
+      context
     );
 
     referenceIndexFiller.fill(documentContext);
@@ -472,7 +544,7 @@ class ReferenceIndexFillerTest {
     assertThat(reference).isPresent();
 
     // when - эмулируем удаление документа из контекста сервера
-    referenceIndexFiller.handleEvent(new ServerContextDocumentRemovedEvent(serverContext, uri));
+    referenceIndexFiller.handleEvent(new ServerContextDocumentRemovedEvent(documentContext.getServerContext(), uri));
 
     // then - все ссылки из этого документа должны быть удалены
     referencesTo = referenceIndex.getReferencesTo(methodSymbol);
@@ -501,7 +573,7 @@ class ReferenceIndexFillerTest {
     assertThat(reference).isPresent();
 
     // when - эмулируем удаление документа из контекста сервера
-    referenceIndexFiller.handleEvent(new ServerContextDocumentRemovedEvent(serverContext, uri));
+    referenceIndexFiller.handleEvent(new ServerContextDocumentRemovedEvent(documentContext.getServerContext(), uri));
 
     // then - все ссылки на переменные из этого документа должны быть удалены
     usage = referenceIndex.getReferencesTo(targetVariable);
@@ -515,31 +587,31 @@ class ReferenceIndexFillerTest {
   void testModuleReferenceRangeNotOverlapAccessorMethod() throws IOException {
     // Тест для проверки поведения: при наведении на ОбщийМодуль() должно показываться описание метода,
     // а не информация о модуле "ПервыйОбщийМодуль"
-    var path = Absolute.path("src/test/resources/metadata/designer");
-    serverContext.setConfigurationRoot(path);
+    initServerContext(PATH_TO_METADATA);
+
 
     var documentContext = TestUtils.getDocumentContextFromFile(
       "./src/test/resources/references/ReferenceIndexCommonModuleVariable.bsl"
     );
 
     // Загружаем модуль ПервыйОбщийМодуль
-    var file = new File("src/test/resources/metadata/designer",
+    var file = new File(PATH_TO_METADATA,
       "CommonModules/ПервыйОбщийМодуль/Ext/Module.bsl");
     var uri = Absolute.uri(file);
     TestUtils.getDocumentContext(
       uri,
       FileUtils.readFileToString(file, StandardCharsets.UTF_8),
-      serverContext
+      context
     );
 
     // Загружаем модуль ОбщегоНазначения с методом ОбщийМодуль
-    var commonFile = new File("src/test/resources/metadata/designer",
+    var commonFile = new File(PATH_TO_METADATA,
       "CommonModules/ОбщегоНазначения/Ext/Module.bsl");
     var commonUri = Absolute.uri(commonFile);
     var commonModuleContext = TestUtils.getDocumentContext(
       commonUri,
       FileUtils.readFileToString(commonFile, StandardCharsets.UTF_8),
-      serverContext
+      context
     );
 
     referenceIndexFiller.fill(documentContext);

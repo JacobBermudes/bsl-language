@@ -22,12 +22,14 @@
 package com.github._1c_syntax.bsl.languageserver.hover;
 
 import com.github._1c_syntax.bsl.languageserver.context.symbol.ModuleSymbol;
-import com.github._1c_syntax.bsl.languageserver.utils.Resources;
+import com.github._1c_syntax.bsl.languageserver.context.symbol.Symbol;
+import com.github._1c_syntax.bsl.languageserver.configuration.Resources;
 import com.github._1c_syntax.bsl.mdo.CommonModule;
+import com.github._1c_syntax.bsl.types.ModuleType;
 import lombok.RequiredArgsConstructor;
 import org.eclipse.lsp4j.MarkupContent;
+import com.github._1c_syntax.bsl.languageserver.references.model.Reference;
 import org.eclipse.lsp4j.MarkupKind;
-import org.eclipse.lsp4j.SymbolKind;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -39,13 +41,24 @@ import java.util.StringJoiner;
  */
 @Component
 @RequiredArgsConstructor
-public class ModuleSymbolMarkupContentBuilder implements MarkupContentBuilder<ModuleSymbol> {
+public class ModuleSymbolMarkupContentBuilder implements MarkupContentBuilder {
 
   private final Resources resources;
   private final DescriptionFormatter descriptionFormatter;
+  private final OScriptClassConstructorRenderer oScriptClassConstructorRenderer;
 
   @Override
-  public MarkupContent getContent(ModuleSymbol symbol) {
+  public MarkupContent getContent(Reference reference) {
+    var symbol = (ModuleSymbol) reference.symbol();
+    var documentContext = symbol.getOwner();
+
+    // Для OneScript-классов без явного конструктора (ссылка из Новый ИмяКласса()
+    // приходит сюда, потому что ReferenceIndexFiller не нашёл ПриСозданииОбъекта)
+    // — рендерим constructor-стилевой hover, как и для классов с явным конструктором.
+    if (documentContext.getModuleType() == ModuleType.OScriptClass) {
+      return oScriptClassConstructorRenderer.renderWithoutConstructor(documentContext);
+    }
+
     var markupBuilder = new StringJoiner("\n");
 
     // Местоположение модуля
@@ -60,9 +73,10 @@ public class ModuleSymbolMarkupContentBuilder implements MarkupContentBuilder<Mo
     return new MarkupContent(MarkupKind.MARKDOWN, content);
   }
 
+
   @Override
-  public SymbolKind getSymbolKind() {
-    return SymbolKind.Module;
+  public Class<? extends Symbol> getSymbolClass() {
+    return ModuleSymbol.class;
   }
 
   private String getModuleInfo(ModuleSymbol symbol) {
